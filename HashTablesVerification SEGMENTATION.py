@@ -1,6 +1,5 @@
 import hashlib
 import time
-import random
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
@@ -45,9 +44,8 @@ class DHT:
         segments.append(data[:500])  # First 500 characters
         segments.append(data[-500:]) # Last 500 characters
 
-        # Random intervals between 5% to 10% of the data length
-        interval_percentage = random.uniform(5, 10) / 100
-        interval_length = int(data_length * interval_percentage)
+        # Fixed intervals (e.g., every 7.5% of the data length)
+        interval_length = int(data_length * 0.075)
 
         # Segment the data at these intervals
         for start in range(500, data_length - 500, interval_length):
@@ -95,9 +93,21 @@ for i, dht_node in enumerate(dht_nodes):
     data = f"Data for Node {i} " * 10000  # Example large data
     dht_node.add_data(data)
 
-# Verify data segments independently for each node
+# Corrected verification loop
+total_true_count = 0
+total_checks = 0
+
 for i, dht_node in enumerate(dht_nodes):
     data_to_verify = f"Data for Node {i} " * 10000  # Same example data
     data_segments = dht_node.segment_data(data_to_verify)
     verification_results = [dht_node.verify_data_segment(segment) for segment in data_segments]
     print(f"Node {i} VERIFICATION RESULTS:", verification_results)
+
+    # Counting the number of True results and total checks for summary
+    total_true_count += sum(result is True for result in verification_results)
+    total_checks += len(verification_results)
+
+# Determining overall verification success
+percentage_true = (total_true_count / total_checks) * 100
+overall_verification = "PASS" if percentage_true >= 70 else "FAIL"
+print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
