@@ -44,13 +44,14 @@ class DHT:
         segments.append(data[:500])  # First 500 characters
         segments.append(data[-500:]) # Last 500 characters
 
-        # Fixed intervals (e.g., every 7.5% of the data length)
-        interval_length = int(data_length * 0.075)
+        # Checking a 100-character segment at every 7.5% interval
+        interval_percentage = 7.5 / 100
+        segment_size = 100  # 100 characters
+        interval_length = int(data_length * interval_percentage)
 
-        # Segment the data at these intervals
         for start in range(500, data_length - 500, interval_length):
-            end = min(start + interval_length, data_length - 500)
-            segments.append(data[start:end])
+            segment = data[start:start + segment_size]
+            segments.append(segment)
 
         return segments
 
@@ -93,7 +94,7 @@ for i, dht_node in enumerate(dht_nodes):
     data = f"Data for Node {i} " * 10000  # Example large data
     dht_node.add_data(data)
 
-# Corrected verification loop
+# Verification loop
 total_true_count = 0
 total_checks = 0
 
