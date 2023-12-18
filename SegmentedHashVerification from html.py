@@ -4,6 +4,7 @@ import requests
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import random
+import math
 
 # Define the number of nodes in the system
 NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
@@ -12,7 +13,7 @@ NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
 FAULTY_PROPORTION = 1/10  # Adjust this value as needed
 
 # Calculate the number of faulty nodes based on the proportion, rounding down
-NUMBER_OF_FAULTY_NODES = int(NUMBER_OF_NODES * FAULTY_PROPORTION)
+NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
 NUMBER_OF_HEALTHY_NODES = NUMBER_OF_NODES - NUMBER_OF_FAULTY_NODES
 
 # Define the interval percentage (adjust as needed)
@@ -21,13 +22,13 @@ interval_percentage = 20 / 100
 # Calculate the number of segments based on interval_percentage
 number_of_segments = int(1 / interval_percentage) + 2
 
-# Update MIN_APPROVALS based on the number_of_segments and number of healthy nodes
-MIN_APPROVALS = 2 * (NUMBER_OF_HEALTHY_NODES * number_of_segments) + 1
+# Calculate the minimum number of approvals required (e.g., 70%)
+MIN_APPROVALS = math.ceil(0.7 * NUMBER_OF_NODES * number_of_segments)
 
 # DataNode class to handle data segments, hashing, and signing
 class DataNode:
     # Initialize with data segments and a private key
-    def __init__(self, data_segments, private_key, is_faulty=False):
+    def __init__(self, data_segments, private_key):
         self.data_segments = data_segments
         self.hashes = [self.generate_hash(segment) for segment in data_segments]
         self.signatures = [self.sign_data(segment, private_key) for segment in data_segments]
@@ -62,12 +63,11 @@ class DHT:
     def add_data(self, data):
         data_segments = self.segment_data(data)
 
-        # Create a list of nodes, marking exactly one node as faulty
+        # Create a list of nodes, marking exactly NUMBER_OF_FAULTY_NODES nodes as faulty
         nodes = [DataNode(data_segments, self.private_key) for _ in range(NUMBER_OF_NODES)]
-        if self.NUMBER_OF_FAULTY_NODES > 0:
-            faulty_node_index = random.randint(0, NUMBER_OF_NODES - 1)
-            self.NUMBER_OF_FAULTY_NODES -= 1  # Decrease the count of faulty nodes
-            nodes[faulty_node_index] = None  # Mark one node as faulty
+        faulty_node_indices = random.sample(range(NUMBER_OF_NODES), NUMBER_OF_FAULTY_NODES)
+        for index in faulty_node_indices:
+            nodes[index] = None  # Mark nodes as faulty
 
         for node in nodes:
             if node is not None:
@@ -161,3 +161,4 @@ for i, dht_node in enumerate(dht_nodes):
 percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
 overall_verification = "PASS" if total_true_count >= MIN_APPROVALS else "FAIL"
 print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
+
