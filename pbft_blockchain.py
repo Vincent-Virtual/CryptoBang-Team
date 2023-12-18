@@ -1,10 +1,20 @@
 from pbft_block import Block  # Import the Block class
 import random
+from pbft_wallet import Wallet  # Import the Wallet class from your Python implementation
 
 class Blockchain:
-    def __init__(self, validators):
-        self.validator_list = validators.generate_addresses()
+    def __init__(self, validators, NUMBER_OF_NODES):
+        self.validator_list = validators.generate_addresses(NUMBER_OF_NODES)
         self.chain = [Block.genesis()]
+
+
+
+    # def generate_addresses(number_of_validators):
+    #     wallet_list = []
+    #     for i in range(number_of_validators):
+    #         wallet = Wallet("NODE" + str(i))
+    #         wallet_list.append(wallet.get_public_key())
+    #     return wallet_list
 
     def add_block(self, block):
         self.chain.append(block)

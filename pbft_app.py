@@ -33,15 +33,16 @@ secret = "your_secret_here"
 new_wallet = Wallet(secret)  # Replace with your actual secret
 transaction_pool = TransactionPool()
 validators = Validators(new_config.NUMBER_OF_NODES)
-blockchain = Blockchain(validators)
+blockchain = Blockchain(validators, new_config.NUMBER_OF_NODES)
 block_pool = BlockPool()
-# prepare_pool = PreparePool()
-# commit_pool = CommitPool()
-# message_pool = MessagePool()
-# p2p_server = P2pServer(
-#     blockchain, transaction_pool, wallet, block_pool, prepare_pool, commit_pool, message_pool, validators
-# )
-#
+prepare_pool = PreparePool()
+commit_pool = CommitPool()
+message_pool = MessagePool()
+p2p_server = P2pServer(
+    blockchain, transaction_pool, new_wallet, block_pool,
+    prepare_pool, commit_pool, message_pool, validators
+)
+
 # @app.route("/transactions", methods=["GET"])
 # def get_transactions():
 #     return jsonify(transaction_pool.transactions), 200
