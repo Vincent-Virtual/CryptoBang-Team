@@ -1,12 +1,16 @@
-import hashlib
-import time
-import websocket
+import asyncio
+import websockets
 import threading
+import time
+import hashlib
+import websocket
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
-# Global variable to store the latest data received from WebSocket
+# Global variable for the latest data and stopping threads
 latest_data = None
+stop_threads = False
+last_verification_result = None
 
 class DataNode:
     def __init__(self, data_segments, private_key):
@@ -42,18 +46,12 @@ class DHT:
             self.nodes[hash] = node
 
     def segment_data(self, data):
-        # Ensure that the data_length is not zero to avoid "range() arg 3 must not be zero" error
-        if len(data) == 0:
-            return []
-
         segments = []
         data_length = len(data)
-        segment_size = 50  # Assuming each segment is 50 characters long
-
+        segment_size = 50
         for start in range(0, data_length, segment_size):
             segment = data[start:min(start + segment_size, data_length)]
             segments.append(segment)
-
         return segments
 
     def verify_data_segment(self, data_segment):
@@ -86,7 +84,7 @@ def fetch_data_from_websocket(url, dht_nodes):
     def on_message(ws, message):
         global latest_data
         latest_data = message
-        print(f"Received message: {message}")  # For debugging
+        print(f"Received message: {message}")
         for dht_node in dht_nodes:
             dht_node.add_data(latest_data)
 
@@ -110,42 +108,69 @@ def fetch_data_from_websocket(url, dht_nodes):
 
 def verify_dht_nodes(dht_nodes):
     global latest_data
-    total_true_count = 0
-    total_checks = 0
-
+    verification_results = []
     for i, dht_node in enumerate(dht_nodes):
         if latest_data:
-            data_to_verify = latest_data
-            data_segments = dht_node.segment_data(data_to_verify)
-            verification_results = [dht_node.verify_data_segment(segment) for segment in data_segments]
-            print(f"Node {i} VERIFICATION RESULTS:", verification_results)
+            result = dht_node.verify_data_segment(latest_data)
+            verification_results.append(f"Node {i+1} {result}")
+    return verification_results
 
-            total_true_count += sum(result is True for result in verification_results)
-            total_checks += len(verification_results)
-
-    percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
-    overall_verification = "PASS" if percentage_true >= 70 else "FAIL"
-    return overall_verification, percentage_true
-
-def periodic_verification(dht_nodes, interval_seconds=30):
-    global latest_data
-    while True:
-        overall_verification, percentage_true = verify_dht_nodes(dht_nodes)
-        print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
+def periodic_verification(dht_nodes, interval_seconds=60):
+    global stop_threads, last_verification_result
+    while not stop_threads:
+        if latest_data:
+            current_results = verify_dht_nodes(dht_nodes)
+            if current_results != last_verification_result:  # Print only if the result changes
+                print(f"Results for data input: {current_results}")
+                last_verification_result = current_results
+        else:
+            print("\nWaiting for data...")
         time.sleep(interval_seconds)
 
-# Set up the DHT nodes
-dht_nodes = []
-for _ in range(5):
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_key = private_key.public_key()
-    dht_nodes.append(DHT(private_key, public_key))
+async def run_websocket_server():
+    async def echo(websocket, path):
+        for message_count in range(10, 0, -1):
+            try:
+                await websocket.send(f"Message {message_count} from local server")
+                await asyncio.sleep(1)
+            except websockets.exceptions.ConnectionClosed:
+                print("Client disconnected")
+                break
 
-# Start the WebSocket client in a separate thread
-websocket_url = "wss://echo.websocket.org"  # Replace with a working WebSocket server URL
-websocket_thread = threading.Thread(target=fetch_data_from_websocket, args=(websocket_url, dht_nodes))
-websocket_thread.start()
+    async with websockets.serve(echo, "localhost", 8765):
+        await asyncio.Future()
 
-# Start the periodic verification in a separate thread
-verification_thread = threading.Thread(target=periodic_verification, args=(dht_nodes,))
-verification_thread.start()
+def start_websocket_server():
+    asyncio.run(run_websocket_server())
+
+def main():
+    global stop_threads
+
+    dht_nodes = []
+    for _ in range(5):
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
+        dht_nodes.append(DHT(private_key, public_key))
+
+    server_thread = threading.Thread(target=start_websocket_server)
+    server_thread.start()
+
+    websocket_thread = threading.Thread(target=fetch_data_from_websocket, args=("ws://localhost:8765", dht_nodes))
+    websocket_thread.start()
+
+    verification_thread = threading.Thread(target=periodic_verification, args=(dht_nodes,))
+    verification_thread.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Stopping threads...")
+        stop_threads = True
+        websocket_thread.join()
+        verification_thread.join()
+        server_thread.join()
+        print("Threads stopped. Exiting program.")
+
+if __name__ == "__main__":
+    main()
