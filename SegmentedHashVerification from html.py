@@ -130,3 +130,4 @@ for i, dht_node in enumerate(dht_nodes):
 percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
 overall_verification = "PASS" if percentage_true >= 70 else "FAIL"
 print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
+
