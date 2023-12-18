@@ -8,6 +8,13 @@ import random
 # Define the number of nodes in the system
 NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
 
+# Define the proportion of nodes that are faulty/dead/malicious (e.g., 1/4, 1/5, 1/10, etc.)
+FAULTY_PROPORTION = 1/4  # Adjust this value as needed
+
+# Calculate the number of faulty nodes based on the proportion
+NUMBER_OF_FAULTY_NODES = int(NUMBER_OF_NODES * FAULTY_PROPORTION)
+NUMBER_OF_HEALTHY_NODES = NUMBER_OF_NODES - NUMBER_OF_FAULTY_NODES
+
 # Define the interval percentage (adjust as needed)
 interval_percentage = 20 / 100
 
@@ -15,16 +22,17 @@ interval_percentage = 20 / 100
 number_of_segments = int(1 / interval_percentage) + 2
 
 # Update MIN_APPROVALS based on the number_of_segments
-MIN_APPROVALS = 2 * (NUMBER_OF_NODES / 3) * number_of_segments + 1
+MIN_APPROVALS = 2 * (NUMBER_OF_HEALTHY_NODES / 3) * number_of_segments + 1
 
 # DataNode class to handle data segments, hashing, and signing
 class DataNode:
     # Initialize with data segments and a private key
-    def __init__(self, data_segments, private_key):
+    def __init__(self, data_segments, private_key, is_faulty=False):
         self.data_segments = data_segments
         self.hashes = [self.generate_hash(segment) for segment in data_segments]
         self.signatures = [self.sign_data(segment, private_key) for segment in data_segments]
         self.timestamp = time.time()
+        self.is_faulty = is_faulty  # Flag to indicate if the node is faulty
 
     # Generate a hash for a given data segment
     @staticmethod
@@ -44,7 +52,7 @@ class DataNode:
 
 # DHT class to simulate a distributed hash table
 class DHT:
-    def __init__(self, private_key, public_key):
+    def __init__(self, private_key, public_key, interval_percentage):
         self.nodes = {}
         self.private_key = private_key
         self.public_key = public_key
@@ -53,7 +61,12 @@ class DHT:
     # Add data to the DHT
     def add_data(self, data):
         data_segments = self.segment_data(data)
-        node = DataNode(data_segments, self.private_key)
+        if NUMBER_OF_FAULTY_NODES > 0:
+            is_faulty = random.randint(0, 1) == 1
+            NUMBER_OF_FAULTY_NODES -= 1
+        else:
+            is_faulty = False
+        node = DataNode(data_segments, self.private_key, is_faulty)
         for hash in node.hashes:
             self.nodes[hash] = node
 
@@ -86,16 +99,19 @@ class DHT:
         
         try:
             index = original_node.data_segments.index(data_segment)
-            self.public_key.verify(
-                original_node.signatures[index],
-                data_segment.encode(),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            return True
+            if original_node.is_faulty:
+                return False  # Faulty nodes always vote False
+            else:
+                self.public_key.verify(
+                    original_node.signatures[index],
+                    data_segment.encode(),
+                    padding.PSS(
+                        mgf=padding.MGF1(hashes.SHA256()),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                    hashes.SHA256()
+                )
+                return True
         except ValueError:
             return False
         except Exception:
@@ -117,7 +133,7 @@ dht_nodes = []
 for _ in range(NUMBER_OF_NODES):  # Use the NUMBER_OF_NODES variable here
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
-    dht_nodes.append(DHT(private_key, public_key))
+    dht_nodes.append(DHT(private_key, public_key, interval_percentage))
 
 # Fetching and adding source data to each DHT node
 source_data = fetch_data_from_url(data_url)
