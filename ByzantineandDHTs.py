@@ -1,10 +1,9 @@
 import hashlib
 import time
 import requests
+import random
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
-import random
-
 
 # DataNode class to handle data segments, hashing, and signing
 class DataNode:
@@ -33,10 +32,11 @@ class DataNode:
 
 # DHT class to simulate a distributed hash table
 class DHT:
-    def __init__(self, private_key, public_key):
+    def __init__(self, private_key, public_key, node_id):
         self.nodes = {}
         self.private_key = private_key
         self.public_key = public_key
+        self.node_id = node_id  # Unique identifier for each node
 
     # Add data to the DHT
     def add_data(self, data):
@@ -53,7 +53,7 @@ class DHT:
         segments.append(data[-500:]) # Last 500 characters
 
         # Define interval and segment size
-        interval_percentage = 7.5 / 100
+        interval_percentage = 20 / 100
         segment_size = 100  # 100 characters
         interval_length = int(data_length * interval_percentage)
 
@@ -62,10 +62,14 @@ class DHT:
             segment = data[start:start + segment_size]
             segments.append(segment)
 
-        return segments
+        return segments 
 
     # Verify a data segment against the stored hash and signature
     def verify_data_segment(self, data_segment):
+        # Simulate a failure for a specific node (e.g., node 5)
+        if self.node_id == 5 and random.random() < 0.5:  # 50% chance of failure
+            return False
+
         new_hash = DataNode.generate_hash(data_segment)
         original_node = self.nodes.get(new_hash)
 
@@ -102,15 +106,15 @@ data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'  # Pride and Prejud
 
 # Creating DHT nodes
 dht_nodes = []
-for _ in range(10):
+for i in range(10):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
-    dht_nodes.append(DHT(private_key, public_key))
+    dht_nodes.append(DHT(private_key, public_key, node_id=i))
 
 # Fetching and adding source data to each DHT node
 source_data = fetch_data_from_url(data_url)
 if source_data:
-    for i, dht_node in enumerate(dht_nodes):
+    for dht_node in dht_nodes:
         dht_node.add_data(source_data)
 
 # Verification loop
@@ -132,4 +136,3 @@ for i, dht_node in enumerate(dht_nodes):
 percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
 overall_verification = "PASS" if percentage_true >= 70 else "FAIL"
 print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
-
