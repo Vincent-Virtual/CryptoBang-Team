@@ -1,0 +1,14 @@
+class PBFTNode:
+    def __init__(self, node_id, total_nodes):
+        self.node_id = node_id
+        self.total_nodes = total_nodes
+        self.state = None
+        self.pre_prepare_msgs = []
+        self.prepare_msgs = []
+        self.commit_msgs = []
+
+    def reset_state(self):
+        self.state = None
+        self.pre_prepare_msgs = []
+        self.prepare_msgs = []
+        self.commit_msgs = []
