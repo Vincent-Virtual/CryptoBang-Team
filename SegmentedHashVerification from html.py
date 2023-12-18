@@ -9,9 +9,9 @@ import random
 NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
 
 # Define the proportion of nodes that are faulty/dead/malicious (e.g., 1/4, 1/5, 1/10, etc.)
-FAULTY_PROPORTION = 1/4  # Adjust this value as needed
+FAULTY_PROPORTION = 1/10  # Adjust this value as needed
 
-# Calculate the number of faulty nodes based on the proportion
+# Calculate the number of faulty nodes based on the proportion, rounding down
 NUMBER_OF_FAULTY_NODES = int(NUMBER_OF_NODES * FAULTY_PROPORTION)
 NUMBER_OF_HEALTHY_NODES = NUMBER_OF_NODES - NUMBER_OF_FAULTY_NODES
 
@@ -21,8 +21,8 @@ interval_percentage = 20 / 100
 # Calculate the number of segments based on interval_percentage
 number_of_segments = int(1 / interval_percentage) + 2
 
-# Update MIN_APPROVALS based on the number_of_segments
-MIN_APPROVALS = 2 * (NUMBER_OF_HEALTHY_NODES / 3) * number_of_segments + 1
+# Update MIN_APPROVALS based on the number_of_segments and number of healthy nodes
+MIN_APPROVALS = 2 * (NUMBER_OF_HEALTHY_NODES * number_of_segments) + 1
 
 # DataNode class to handle data segments, hashing, and signing
 class DataNode:
@@ -32,7 +32,6 @@ class DataNode:
         self.hashes = [self.generate_hash(segment) for segment in data_segments]
         self.signatures = [self.sign_data(segment, private_key) for segment in data_segments]
         self.timestamp = time.time()
-        self.is_faulty = is_faulty  # Flag to indicate if the node is faulty
 
     # Generate a hash for a given data segment
     @staticmethod
@@ -57,18 +56,23 @@ class DHT:
         self.private_key = private_key
         self.public_key = public_key
         self.interval_percentage = interval_percentage  # Store interval_percentage as an instance variable
+        self.NUMBER_OF_FAULTY_NODES = NUMBER_OF_FAULTY_NODES  # Store NUMBER_OF_FAULTY_NODES as an instance variable
 
     # Add data to the DHT
     def add_data(self, data):
         data_segments = self.segment_data(data)
-        if NUMBER_OF_FAULTY_NODES > 0:
-            is_faulty = random.randint(0, 1) == 1
-            NUMBER_OF_FAULTY_NODES -= 1
-        else:
-            is_faulty = False
-        node = DataNode(data_segments, self.private_key, is_faulty)
-        for hash in node.hashes:
-            self.nodes[hash] = node
+
+        # Create a list of nodes, marking exactly one node as faulty
+        nodes = [DataNode(data_segments, self.private_key) for _ in range(NUMBER_OF_NODES)]
+        if self.NUMBER_OF_FAULTY_NODES > 0:
+            faulty_node_index = random.randint(0, NUMBER_OF_NODES - 1)
+            self.NUMBER_OF_FAULTY_NODES -= 1  # Decrease the count of faulty nodes
+            nodes[faulty_node_index] = None  # Mark one node as faulty
+
+        for node in nodes:
+            if node is not None:
+                for hash in node.hashes:
+                    self.nodes[hash] = node
 
     # Segment data into specified chunks
     def segment_data(self, data):
@@ -78,7 +82,7 @@ class DHT:
         segments.append(data[-500:]) # Last 500 characters
 
         # Define interval and segment size
-        interval_percentage = self.interval_percentage  # Use the instance variable
+        interval_percentage = self.interval_percentage
         segment_size = 100  # 100 characters
         interval_length = int(data_length * interval_percentage)
 
@@ -99,19 +103,16 @@ class DHT:
         
         try:
             index = original_node.data_segments.index(data_segment)
-            if original_node.is_faulty:
-                return False  # Faulty nodes always vote False
-            else:
-                self.public_key.verify(
-                    original_node.signatures[index],
-                    data_segment.encode(),
-                    padding.PSS(
-                        mgf=padding.MGF1(hashes.SHA256()),
-                        salt_length=padding.PSS.MAX_LENGTH
-                    ),
-                    hashes.SHA256()
-                )
-                return True
+            self.public_key.verify(
+                original_node.signatures[index],
+                data_segment.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
         except ValueError:
             return False
         except Exception:
