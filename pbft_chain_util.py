@@ -3,7 +3,6 @@ import uuid
 from Crypto.Hash import SHA256
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.exceptions import InvalidSignature
@@ -20,7 +19,8 @@ class ChainUtil:
 
         private_key = ed25519.Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
-        signature = private_key.sign(secret)
+        secret_bytes = secret.encode('utf-8')
+        signature = private_key.sign(secret_bytes)
         return signature
 
     # returns ids used in transactions
@@ -57,5 +57,5 @@ class ChainUtil:
 #     print("Signature is valid.")
 # else:
 #     print("Signature is invalid.")
-ff = str(uuid.uuid4())
-print(ff)
+# ff = str(uuid.uuid4())
+# print(ff)
