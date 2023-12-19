@@ -59,7 +59,7 @@ class DHT:
     def process_segment(self, segment, segment_hash, signature, timestamp):
         return {node.node_id: node.vote(segment, segment_hash, self.public_key, signature, timestamp) for node in self.nodes}
 
-# Function to segment the data and create hash, signature, and timestamp
+# Function to segment the data
 def segment_data(data, private_key):
     segments = [data[:100], data[-100:]] + [data[random.randint(100, len(data)-150):random.randint(100, len(data)-150) + 50] for _ in range(5)]
     segment_info = []
@@ -75,6 +75,7 @@ def segment_data(data, private_key):
             hashes.SHA256()
         )
         timestamp = datetime.now().timestamp()
+
         segment_info.append((segment, segment_hash, signature, timestamp))
 
     return segment_info
@@ -102,8 +103,8 @@ def process_stream(url, private_key):
 
         for segment, segment_hash, signature, timestamp in segments_info:
             segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
-            for node_id, vote in segment_votes.items():
-                node_votes[node_id].append(vote)
+            for node_id in range(NUMBER_OF_NODES):
+                node_votes[node_id].append(segment_votes[node_id])
             chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
 
         for node_id, votes in node_votes.items():
@@ -116,3 +117,4 @@ data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'
 
 # Process the data stream
 process_stream(data_url, private_key)
+
