@@ -1,150 +1,118 @@
-import hashlib
-import time
 import requests
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import random
 import math
+import hashlib
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from datetime import datetime
 
-# Define the number of nodes in the system
-NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
-
-# Define the proportion of nodes that are faulty/dead/malicious (e.g., 1/4, 1/5, 1/10, etc.)
-FAULTY_PROPORTION = 2/3  # Adjust this value as needed
-
-# Calculate the number of faulty nodes based on the proportion, rounding down
+# Constants
+NUMBER_OF_NODES = 10
+FAULTY_PROPORTION = 1/3
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
-NUMBER_OF_HEALTHY_NODES = NUMBER_OF_NODES - NUMBER_OF_FAULTY_NODES
+CHUNK_SIZE = 100000 * 1  # 100KB
+NUMBER_OF_SEGMENTS = 7  # First 100, last 100, and 5 random 50-char segments
+NUMBER_OF_CHUNKS_TO_PROCESS = 3  # Number of chunks to process
 
-# Define the interval percentage (adjust as needed)
-interval_percentage = 20 / 100
+# Generate RSA keys (private and public)
+private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+public_key = private_key.public_key()
 
-# Calculate the number of segments based on interval_percentage
-number_of_segments = int(1 / interval_percentage) + 2
+# Node Class
+class Node:
+    def __init__(self, node_id, is_faulty):
+        self.node_id = node_id
+        self.is_faulty = is_faulty
 
-# Calculate the minimum number of approvals required (e.g., 70%)
-MIN_APPROVALS = math.ceil(0.7 * NUMBER_OF_NODES * number_of_segments)
+    def vote(self, segment, segment_hash, public_key, signature, timestamp):
+        if self.is_faulty:
+            return random.choice([True, False])
 
-# DataNode class to handle data segments, hashing, and signing
-class DataNode:
-    # Initialize with data segments and a private key
-    def __init__(self, data_segments, private_key):
-        self.data_segments = data_segments
-        self.hashes = [self.generate_hash(segment) for segment in data_segments]
-        self.signatures = [self.sign_data(segment, private_key) for segment in data_segments]
-        self.timestamp = time.time()
+        calculated_hash = hashlib.sha256(segment.encode()).hexdigest()
+        if calculated_hash != segment_hash:
+            return False
 
-    # Generate a hash for a given data segment
-    @staticmethod
-    def generate_hash(data_segment):
-        return hashlib.sha256(data_segment.encode()).hexdigest()
+        try:
+            public_key.verify(
+                signature,
+                calculated_hash.encode(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+        except Exception:
+            return False
 
-    # Sign a given data segment using the private key
-    def sign_data(self, data_segment, private_key):
-        return private_key.sign(
-            data_segment.encode(),
+        if datetime.now().timestamp() - timestamp > 300:
+            return False
+
+        return True
+
+# DHT Class
+class DHT:
+    def __init__(self, public_key):
+        self.nodes = [Node(i, i < NUMBER_OF_FAULTY_NODES) for i in range(NUMBER_OF_NODES)]
+        self.public_key = public_key
+
+    def process_segment(self, segment, segment_hash, signature, timestamp):
+        return {node.node_id: node.vote(segment, segment_hash, self.public_key, signature, timestamp) for node in self.nodes}
+
+# Function to segment the data and create hash, signature, and timestamp
+def segment_data(data, private_key):
+    segments = [data[:100], data[-100:]] + [data[random.randint(100, len(data)-150):random.randint(100, len(data)-150) + 50] for _ in range(5)]
+    segment_info = []
+
+    for segment in segments:
+        segment_hash = hashlib.sha256(segment.encode()).hexdigest()
+        signature = private_key.sign(
+            segment_hash.encode(),
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
             ),
             hashes.SHA256()
         )
+        timestamp = datetime.now().timestamp()
+        segment_info.append((segment, segment_hash, signature, timestamp))
 
-# DHT class to simulate a distributed hash table
-class DHT:
-    def __init__(self, private_key, public_key, interval_percentage):
-        self.nodes = {}
-        self.private_key = private_key
-        self.public_key = public_key
-        self.interval_percentage = interval_percentage  # Store interval_percentage as an instance variable
-        self.NUMBER_OF_FAULTY_NODES = NUMBER_OF_FAULTY_NODES  # Store NUMBER_OF_FAULTY_NODES as an instance variable
+    return segment_info
 
-    # Add data to the DHT
-    def add_data(self, data):
-        # Split data into 1MB chunks
-        data_chunks = [data[i:i+1024*1024] for i in range(0, len(data), 1024*1024)]
-
-        for chunk in data_chunks:
-            data_segments = self.segment_data(chunk)
-
-            # Create a list of nodes, marking exactly NUMBER_OF_FAULTY_NODES nodes as faulty
-            nodes = [DataNode(data_segments, self.private_key) for _ in range(NUMBER_OF_NODES)]
-            faulty_node_indices = random.sample(range(NUMBER_OF_NODES), NUMBER_OF_FAULTY_NODES)
-            for index in faulty_node_indices:
-                nodes[index] = None  # Mark nodes as faulty
-
-            for node in nodes:
-                if node is not None:
-                    for hash in node.hashes:
-                        self.nodes[hash] = node
-
-    # Segment data into specified chunks
-    def segment_data(self, data):
-        segments = []
-        data_length = len(data)
-        segments.append(data[:500])  # First 500 characters
-        segments.append(data[-500:]) # Last 500 characters
-
-        # Define interval and segment size
-        interval_percentage = self.interval_percentage
-        segment_size = 100  # 100 characters
-        interval_length = int(data_length * interval_percentage)
-
-        # Segmenting the data
-        for start in range(500, data_length - 500, interval_length):
-            segment = data[start:start + segment_size]
-            segments.append(segment)
-
-        return segments
-
-    # Verify a data segment against the stored hash and signature
-    def verify_data_segment(self, data_segment):
-        return True  # Always return True for verification
-
-# Function to fetch data from a given URL
-def fetch_data_from_url(url):
+# Stream Processing Function
+def process_stream(url, private_key):
     response = requests.get(url, stream=True)
-    if response.status_code == 200:
-        for chunk in response.iter_content(chunk_size=1024):
-            try:
-                yield chunk.decode("utf-8", errors='ignore')  # Ignore decoding errors
-            except UnicodeDecodeError:
-                pass  # Ignore decoding errors
-    else:
-        return None
+    dht = DHT(public_key)
+    chunks_processed = 0
 
-# URL for the source data (sample plain text data)
-data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'  # Pride and Prejudice by Jane Austen
+    for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+        if chunks_processed >= NUMBER_OF_CHUNKS_TO_PROCESS:
+            break
 
-# Creating DHT nodes
-dht_nodes = []
-for _ in range(NUMBER_OF_NODES):  # Use the NUMBER_OF_NODES variable here
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_key = private_key.public_key()
-    dht_nodes.append(DHT(private_key, public_key, interval_percentage))
+        if len(chunk) < CHUNK_SIZE:
+            print(f"Chunk {chunks_processed + 1} is smaller than 100KB, stopping processing.\n")
+            break
 
-# Fetching and adding source data to each DHT node
-source_data = fetch_data_from_url(data_url)
-if source_data:
-    for i, dht_node in enumerate(dht_nodes):
-        dht_node.add_data("".join(source_data))
+        data_chunk = chunk.decode("utf-8", errors='ignore')
+        segments_info = segment_data(data_chunk, private_key)
+        print(f"\nChunk {chunks_processed + 1}")
 
-# Verification loop
-total_true_count = 0
-total_checks = 0
+        node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
+        chunk_consensus = True
 
-for i, dht_node in enumerate(dht_nodes):
-    data_to_verify = fetch_data_from_url(data_url)  # Fetching the same data for verification
-    if data_to_verify:
-        data_segments = dht_node.segment_data("".join(data_to_verify))
-        verification_results = [dht_node.verify_data_segment(segment) for segment in data_segments]
-        print(f"Node {i} VERIFICATION RESULTS:", verification_results)
+        for segment, segment_hash, signature, timestamp in segments_info:
+            segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
+            for node_id, vote in segment_votes.items():
+                node_votes[node_id].append(vote)
+            chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
 
-        # Counting results
-        total_true_count += sum(result is True for result in verification_results)
-        total_checks += len(verification_results)
+        for node_id, votes in node_votes.items():
+            print(f"Node {node_id} Votes: {votes}")
+        print(f"Chunk {chunks_processed + 1} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
+        chunks_processed += 1
 
-# Calculating overall verification success
-percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
-overall_verification = "PASS" if total_true_count >= MIN_APPROVALS else "FAIL"
-print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
+# URL of the data stream
+data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'
+
+# Process the data stream
+process_stream(data_url, private_key)
