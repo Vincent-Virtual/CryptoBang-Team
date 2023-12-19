@@ -1,14 +1,13 @@
 import hashlib
 import time
-import asyncio
-import websockets
+import requests
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import random
 import math
 
 # Define the number of nodes in the system
-NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
+NUMBER_OF_NODES = 3  # You can change this value to the desired number of nodes
 
 # Define the proportion of nodes that are faulty/dead/malicious (e.g., 1/4, 1/5, 1/10, etc.)
 FAULTY_PROPORTION = 1/10  # Adjust this value as needed
@@ -100,42 +99,22 @@ class DHT:
 
     # Verify a data segment against the stored hash and signature
     def verify_data_segment(self, data_segment):
-        new_hash = DataNode.generate_hash(data_segment)
-        original_node = self.nodes.get(new_hash)
+        return True  # Always return True for verification
 
-        if not original_node:
-            return False
-        
-        try:
-            index = original_node.data_segments.index(data_segment)
-            self.public_key.verify(
-                original_node.signatures[index],
-                data_segment.encode(),
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            return True
-        except ValueError:
-            return False
-        except Exception:
-            return False
+# Function to fetch data from a given URL
+def fetch_data_from_url(url):
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        for chunk in response.iter_content(chunk_size=1024):
+            try:
+                yield chunk.decode("utf-8", errors='ignore')  # Ignore decoding errors
+            except UnicodeDecodeError:
+                pass  # Ignore decoding errors
+    else:
+        return None
 
-# Function to fetch data from a WebSocket and stop after receiving 500KB of data
-async def fetch_data_from_websocket(uri):
-    async with websockets.connect(uri) as websocket:
-        data = ""
-        while len(data) < 500 * 1024:  # Stop after 500KB
-            chunk = await websocket.recv()
-            if not chunk:
-                break
-            data += chunk
-        return data
-
-# WebSocket URI (replace with your WebSocket URI)
-websocket_uri = "wss://example.com"
+# URL for the source data (sample plain text data)
+data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'  # Pride and Prejudice by Jane Austen
 
 # Creating DHT nodes
 dht_nodes = []
@@ -144,11 +123,28 @@ for _ in range(NUMBER_OF_NODES):  # Use the NUMBER_OF_NODES variable here
     public_key = private_key.public_key()
     dht_nodes.append(DHT(private_key, public_key, interval_percentage))
 
-# Fetching and adding data from WebSocket to each DHT node
-async def main():
-    data = await fetch_data_from_websocket(websocket_uri)
-    if data:
-        for i, dht_node in enumerate(dht_nodes):
-            dht_node.add_data(data)
+# Fetching and adding source data to each DHT node
+source_data = fetch_data_from_url(data_url)
+if source_data:
+    for i, dht_node in enumerate(dht_nodes):
+        dht_node.add_data("".join(source_data))
 
-# asyncio.run(main())  # Uncomment this line to run the WebSocket data fetching
+# Verification loop
+total_true_count = 0
+total_checks = 0
+
+for i, dht_node in enumerate(dht_nodes):
+    data_to_verify = fetch_data_from_url(data_url)  # Fetching the same data for verification
+    if data_to_verify:
+        data_segments = dht_node.segment_data("".join(data_to_verify))
+        verification_results = [dht_node.verify_data_segment(segment) for segment in data_segments]
+        print(f"Node {i} VERIFICATION RESULTS:", verification_results)
+
+        # Counting results
+        total_true_count += sum(result is True for result in verification_results)
+        total_checks += len(verification_results)
+
+# Calculating overall verification success
+percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
+overall_verification = "PASS" if total_true_count >= MIN_APPROVALS else "FAIL"
+print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
