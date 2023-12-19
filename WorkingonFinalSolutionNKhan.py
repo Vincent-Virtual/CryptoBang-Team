@@ -7,10 +7,10 @@ import random
 import math
 
 # Define the number of nodes in the system
-NUMBER_OF_NODES = 3  # You can change this value to the desired number of nodes
+NUMBER_OF_NODES = 10  # You can change this value to the desired number of nodes
 
 # Define the proportion of nodes that are faulty/dead/malicious (e.g., 1/4, 1/5, 1/10, etc.)
-FAULTY_PROPORTION = 1/10  # Adjust this value as needed
+FAULTY_PROPORTION = 2/3  # Adjust this value as needed
 
 # Calculate the number of faulty nodes based on the proportion, rounding down
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
