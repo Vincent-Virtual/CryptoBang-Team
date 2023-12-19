@@ -1,6 +1,7 @@
 import hashlib
 import time
-import requests
+import asyncio
+import websockets
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 import random
@@ -122,16 +123,19 @@ class DHT:
         except Exception:
             return False
 
-# Function to fetch data from a given URL
-def fetch_data_from_url(url):
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.text
-    else:
-        return None
+# Function to fetch data from a WebSocket and stop after receiving 500KB of data
+async def fetch_data_from_websocket(uri):
+    async with websockets.connect(uri) as websocket:
+        data = ""
+        while len(data) < 500 * 1024:  # Stop after 500KB
+            chunk = await websocket.recv()
+            if not chunk:
+                break
+            data += chunk
+        return data
 
-# URL for the source data (sample plain text data)
-data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'  # Pride and Prejudice by Jane Austen
+# WebSocket URI (replace with your WebSocket URI)
+websocket_uri = "wss://example.com"
 
 # Creating DHT nodes
 dht_nodes = []
@@ -140,28 +144,11 @@ for _ in range(NUMBER_OF_NODES):  # Use the NUMBER_OF_NODES variable here
     public_key = private_key.public_key()
     dht_nodes.append(DHT(private_key, public_key, interval_percentage))
 
-# Fetching and adding source data to each DHT node
-source_data = fetch_data_from_url(data_url)
-if source_data:
-    for i, dht_node in enumerate(dht_nodes):
-        dht_node.add_data(source_data)
+# Fetching and adding data from WebSocket to each DHT node
+async def main():
+    data = await fetch_data_from_websocket(websocket_uri)
+    if data:
+        for i, dht_node in enumerate(dht_nodes):
+            dht_node.add_data(data)
 
-# Verification loop
-total_true_count = 0
-total_checks = 0
-
-for i, dht_node in enumerate(dht_nodes):
-    data_to_verify = fetch_data_from_url(data_url)  # Fetching the same data for verification
-    if data_to_verify:
-        data_segments = dht_node.segment_data(data_to_verify)
-        verification_results = [dht_node.verify_data_segment(segment) for segment in data_segments]
-        print(f"Node {i} VERIFICATION RESULTS:", verification_results)
-
-        # Counting results
-        total_true_count += sum(result is True for result in verification_results)
-        total_checks += len(verification_results)
-
-# Calculating overall verification success
-percentage_true = (total_true_count / total_checks) * 100 if total_checks > 0 else 0
-overall_verification = "PASS" if total_true_count >= MIN_APPROVALS else "FAIL"
-print(f"\nOverall Verification: {overall_verification} ({percentage_true:.2f}% True)")
+# asyncio.run(main())  # Uncomment this line to run the WebSocket data fetching
