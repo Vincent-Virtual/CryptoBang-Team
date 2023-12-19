@@ -6,7 +6,7 @@ import math
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
-CHUNK_SIZE = 1024 * 1024  # 1MB
+CHUNK_SIZE = 100 * 1024  # 100KB
 NUMBER_OF_SEGMENTS = 7  # First 100, last 100, and 5 random 50-char segments
 NUMBER_OF_CHUNKS_TO_PROCESS = 3  # Number of chunks to process
 

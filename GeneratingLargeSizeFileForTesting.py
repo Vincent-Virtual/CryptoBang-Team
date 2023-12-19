@@ -6,4 +6,4 @@ def generate_large_html(file_name, target_size_mb):
         while file.tell() < target_size_bytes:
             file.write(sample_html)
 
-generate_large_html("large_file.html", 100)  # Generates a 100MB HTML file
+generate_large_html("large_file.html", 10)  # Generates a 100MB HTML file
