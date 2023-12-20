@@ -1,13 +1,18 @@
 import websocket
 import json
+import csv
 import threading
 import time
+import os
 import random
+import prettytable
+
 import math
 import hashlib
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
+
 
 # Constants
 NUMBER_OF_NODES = 10
@@ -58,6 +63,22 @@ class Node:
 
         return True
 
+    # def export_to_csv(chunk_number,
+    #                   chunk_consensus,
+    #                   true_vote_percentage,
+    #                   CSV_FILENAME):
+    #
+        #
+        # # Write header if the file doesn't exist
+        # write_header = not os.path.exists(CSV_FILENAME)
+        # with open(CSV_FILENAME, mode='a', newline='') as csvfile:
+        #     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        #
+        #     if write_header:
+        #         writer.writeheader()
+        #
+        #     # Write row data
+        #     writer.writerow(row_data)
 # DHT Class
 class DHT:
     def __init__(self, public_key):
@@ -94,6 +115,82 @@ def segment_data(data, private_key):
     return segment_info
 
 # Function to process and clear the buffer
+# def export_to_csv(chunk_number,
+#                       chunk_consensus,
+#                       true_vote_percentage,
+#                       CSV_FILENAME):
+#     fieldnames = ['Chunk', 'Consensus', 'True Vote Percentage']
+#     row_data = {
+#             'Chunk': chunk_number,
+#             'Consensus': 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully',
+#             'True Vote Percentage': true_vote_percentage
+#         }
+
+def generate_table(chunk_number, segments_info, node_votes):
+    table = prettytable.PrettyTable()
+
+    # Set column names
+    column_names = [f"Segment_{i}" for i in range(len(segments_info))]
+    table.field_names = ['Nodes'] + column_names
+
+    # Add data to the table
+    for node_id, votes in node_votes.items():
+        table.add_row([f"Node_{node_id}"] + votes)
+
+    # Print the table
+    print(f"Table for Chunk {chunk_number}:\n")
+    print(table)
+    print("\n")
+
+
+def process_buffer(dht, chunk_number):
+    global DATA_BUFFER
+    if len(DATA_BUFFER) >= CHUNK_SIZE:
+        segments_info = segment_data(DATA_BUFFER[:CHUNK_SIZE], private_key)
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
+
+        print(f"Chunk {chunk_number}")
+        node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
+        chunk_consensus = True
+        total_true_votes = 0
+        # CSV_FILENAME = "consensus_results.csv"
+        # with open(CSV_FILENAME, mode='w', newline='') as csvfile:
+        #    # fieldnames = ['Segment', 'Consensus']
+        #    # writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        #    # writer.writeheader()
+        for segment, segment_hash, signature, timestamp in segments_info:
+            segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
+            for node_id in range(NUMBER_OF_NODES):
+                node_votes[node_id].append(segment_votes[node_id])
+                if segment_votes[node_id]:
+                    total_true_votes += 1
+            chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
+
+        for node_id, votes in node_votes.items():
+            print(f"Node {node_id} Votes: {votes}")
+           # writer.writerow({'Node': node_id, 'Votes': votes})
+
+
+        total_votes = len(segments_info) * NUMBER_OF_NODES
+        true_vote_percentage = (total_true_votes / total_votes) * 100
+        print(f"Chunk {chunk_number} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'} ({true_vote_percentage:.2f}% true)\n")
+
+        #generate_table(chunk_number, segments_info, node_votes)
+        write_csv(chunk_number, segments_info, node_votes)
+        #writer.writerow({'Segment': chunk_number + 1, 'Consensus': 'Valid' if chunk_consensus else 'Invalid'})
+       # export_to_csv(chunk_number, chunk_consensus, true_vote_percentage, node_votes)
+
+    #export_to_csv(chunk_number,chunk_consensus,true_vote_percentage,CSV_FILENAME)
+        print("finished exporting")
+import csv
+import os
+
+# ... (existing code)
+
+# Constants
+CSV_FILENAME = 'votes_table.csv'
+
+# Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
     global DATA_BUFFER
     if len(DATA_BUFFER) >= CHUNK_SIZE:
@@ -120,6 +217,30 @@ def process_buffer(dht, chunk_number):
         true_vote_percentage = (total_true_votes / total_votes) * 100
         print(f"Chunk {chunk_number} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'} ({true_vote_percentage:.2f}% true)\n")
 
+        # Generate and write the CSV file
+        write_csv(chunk_number, segments_info, node_votes)
+
+# Function to generate and write the CSV file
+def write_csv(chunk_number, segments_info, node_votes):
+    csv_filename = f'votes_table_chunk_{chunk_number}.csv'
+    with open(csv_filename, mode='w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+
+        # Write header
+        header = ['Nodes'] + [f"Segment_{i}" for i in range(len(segments_info))]
+        writer.writerow(header)
+
+        # Write data
+        for node_id, votes in node_votes.items():
+            row_data = [f"Node_{node_id}"] + votes
+            writer.writerow(row_data)
+
+    print(f"CSV file '{csv_filename}' created successfully.\n")
+
+# ... (existing code)
+
+
+
 # Function to check buffer size periodically
 def check_buffer_size(dht):
     global exit_flag
@@ -133,6 +254,7 @@ def check_buffer_size(dht):
             chunk_number += 1
         else:
             print(f"Waiting for enough data for Chunk {chunk_number}...")
+
         time.sleep(BUFFER_CHECK_FREQUENCY)
     print("Exiting buffer check thread.")
 
