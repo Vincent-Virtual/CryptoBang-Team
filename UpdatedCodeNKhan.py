@@ -26,9 +26,6 @@ number_of_chunks = 3  # Adjust this to your desired number
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
-# Initialize chunk number
-current_chunk = 0  # Initialize to 0
-
 # Node Class
 class Node:
     def __init__(self, node_id, is_faulty):
@@ -72,19 +69,14 @@ class DHT:
 
 # Function to segment the data
 def segment_data(data, private_key):
-    # Check if data is long enough to segment
     if len(data) < 250:
-        # Handle short data, e.g., return an empty list or log a message
         return []
 
-    # Split data into segments
     segments = [data[:100], data[-100:]]  # First and last 100 characters
-    # Add 5 random segments of 50 characters each
     for _ in range(5):
         start_index = random.randint(100, len(data) - 150)
         segments.append(data[start_index:start_index + 50])
 
-    # Generate hash and signature for each segment
     segment_info = []
     for segment in segments:
         segment_hash = hashlib.sha256(segment.encode()).hexdigest()
@@ -106,46 +98,53 @@ def process_buffer(dht, chunk_number):
     global DATA_BUFFER
     if len(DATA_BUFFER) >= CHUNK_SIZE:
         segments_info = segment_data(DATA_BUFFER[:CHUNK_SIZE], private_key)
-        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]  # Remove processed data from buffer
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
         print(f"Chunk {chunk_number}")
         node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
         chunk_consensus = True
+        total_true_votes = 0
 
         for segment, segment_hash, signature, timestamp in segments_info:
             segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
             for node_id in range(NUMBER_OF_NODES):
                 node_votes[node_id].append(segment_votes[node_id])
+                if segment_votes[node_id]:
+                    total_true_votes += 1
             chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
 
         for node_id, votes in node_votes.items():
             print(f"Node {node_id} Votes: {votes}")
 
-        print(f"Chunk {chunk_number} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
+        total_votes = len(segments_info) * NUMBER_OF_NODES
+        true_vote_percentage = (total_true_votes / total_votes) * 100
+        print(f"Chunk {chunk_number} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'} ({true_vote_percentage:.2f}% true)\n")
+
+# Function to check buffer size periodically
+def check_buffer_size(dht):
+    global exit_flag
+    chunk_number = 1
+    while not exit_flag and chunk_number <= number_of_chunks:
+        if len(DATA_BUFFER) >= CHUNK_SIZE:
+            process_buffer(dht, chunk_number)
+            if chunk_number == number_of_chunks:
+                exit_flag = True  # Set exit flag to ensure main program exits
+                break
+            chunk_number += 1
+        else:
+            print(f"Waiting for enough data for Chunk {chunk_number}...")
+        time.sleep(BUFFER_CHECK_FREQUENCY)
+    print("Exiting buffer check thread.")
+
 
 # Binance WebSocket message processing function
 def process_binance_message(ws_message):
     global DATA_BUFFER
     message_data = json.loads(ws_message)
-
     if 'p' in message_data:
         DATA_BUFFER += message_data['p']
-        # Commented out to stop printing each received trade price
-        # print(f"Received trade price: {message_data['p']}, Buffer length: {len(DATA_BUFFER)}")
     else:
         print("No price field in the received message.")
-
-# Function to check buffer size periodically
-def check_buffer_size(dht):
-    global exit_flag
-    chunk_number = 0
-    while not exit_flag and chunk_number < number_of_chunks:
-        chunk_number += 1
-        process_buffer(dht, chunk_number)
-        time.sleep(BUFFER_CHECK_FREQUENCY)
-        if len(DATA_BUFFER) < CHUNK_SIZE:
-            print("Waiting for data to pile up...")
-    print("Exiting buffer check thread.")
 
 # Binance WebSocket event handlers
 def on_message(ws, message):
@@ -174,13 +173,17 @@ buffer_thread.start()
 
 # Main loop for keeping the script running
 try:
-    while True:  # Keep the main thread alive
+    while True:
+        if exit_flag:
+            break  # Break the loop if exit_flag is True
         time.sleep(0.1)
 except KeyboardInterrupt:
     print("Exiting program...")
     exit_flag = True
-    ws.close()
-    buffer_thread.join()
-    ws_thread.join()
+
+# Close WebSocket and wait for threads to finish
+ws.close()
+buffer_thread.join()
+ws_thread.join()
 
 print("Program exited gracefully.")
