@@ -103,6 +103,37 @@ def process_buffer(dht, chunk_number):
         segments_info = segment_data(DATA_BUFFER[:CHUNK_SIZE], private_key)
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
+        chunk_consensus = True  # Initialize consensus for the chunk
+        total_true_votes = 0
+
+        try:
+            with open('websocket_data.csv', mode='a', newline='') as file:
+                writer = csv.writer(file)
+                for segment, segment_hash, signature, timestamp in segments_info:
+                    segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
+                    for node_id in range(NUMBER_OF_NODES):
+                        node_votes[node_id].append(segment_votes[node_id])
+                        if segment_votes[node_id]:
+                            total_true_votes += 1
+                    chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
+
+                    # Writing to CSV
+                    writer.writerow([chunk_number, segment, segment_hash, signature.hex(), timestamp, 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'])
+            print(f"Chunk {chunk_number} data written to CSV.")  # Debugging print
+        except Exception as e:
+            print(f"Error writing to CSV file: {e}")  # Exception print
+    else:
+        print(f"Not enough data for chunk {chunk_number}.")  # Debugging print
+
+# Function to check buffer size periodically
+def process_buffer(dht, chunk_number):
+    global DATA_BUFFER
+    print(f"Checking data for chunk {chunk_number}...")  # Debugging print
+    if len(DATA_BUFFER) >= CHUNK_SIZE:
+        print(f"Processing chunk {chunk_number}...")  # Debugging print
+        segments_info = segment_data(DATA_BUFFER[:CHUNK_SIZE], private_key)
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
+
         node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}  # Initialize node_votes
         chunk_consensus = True  # Initialize consensus for the chunk
         total_true_votes = 0
@@ -126,22 +157,6 @@ def process_buffer(dht, chunk_number):
     else:
         print(f"Not enough data for chunk {chunk_number}.")  # Debugging print
 
-
-# Function to check buffer size periodically
-def check_buffer_size(dht):
-    global exit_flag
-    chunk_number = 1
-    while not exit_flag and chunk_number <= number_of_chunks:
-        if len(DATA_BUFFER) >= CHUNK_SIZE:
-            process_buffer(dht, chunk_number)
-            if chunk_number == number_of_chunks:
-                exit_flag = True  # Set exit flag to ensure main program exits
-                break
-            chunk_number += 1
-        else:
-            print(f"Waiting for enough data for Chunk {chunk_number}...")
-        time.sleep(BUFFER_CHECK_FREQUENCY)
-    print("Exiting buffer check thread.")
 
 # Binance WebSocket message processing function
 def process_binance_message(ws_message):
