@@ -13,14 +13,21 @@ from datetime import datetime
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
-CHUNK_SIZE = 100 * 1  # Adjusted chunk size
+CHUNK_SIZE = 500 * 1  # Adjusted chunk size
 BUFFER_CHECK_FREQUENCY = 20  # Seconds
 DATA_BUFFER = ""  # Initialize data buffer
 exit_flag = False  # Flag for graceful exit
 
+# Define the number of segments and chunks
+number_of_segments = 5  # Adjust this to your desired number
+number_of_chunks = 3  # Adjust this to your desired number
+
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
+
+# Initialize chunk number
+current_chunk = 0  # Initialize to 0
 
 # Node Class
 class Node:
@@ -65,9 +72,20 @@ class DHT:
 
 # Function to segment the data
 def segment_data(data, private_key):
-    segments = [data[:100], data[-100:]] + [data[random.randint(100, len(data)-150):random.randint(100, len(data)-150) + 50] for _ in range(5)]
-    segment_info = []
+    # Check if data is long enough to segment
+    if len(data) < 250:
+        # Handle short data, e.g., return an empty list or log a message
+        return []
 
+    # Split data into segments
+    segments = [data[:100], data[-100:]]  # First and last 100 characters
+    # Add 5 random segments of 50 characters each
+    for _ in range(5):
+        start_index = random.randint(100, len(data) - 150)
+        segments.append(data[start_index:start_index + 50])
+
+    # Generate hash and signature for each segment
+    segment_info = []
     for segment in segments:
         segment_hash = hashlib.sha256(segment.encode()).hexdigest()
         signature = private_key.sign(
@@ -79,18 +97,18 @@ def segment_data(data, private_key):
             hashes.SHA256()
         )
         timestamp = datetime.now().timestamp()
-
         segment_info.append((segment, segment_hash, signature, timestamp))
 
     return segment_info
 
 # Function to process and clear the buffer
-def process_buffer(dht):
+def process_buffer(dht, chunk_number):
     global DATA_BUFFER
     if len(DATA_BUFFER) >= CHUNK_SIZE:
         segments_info = segment_data(DATA_BUFFER[:CHUNK_SIZE], private_key)
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]  # Remove processed data from buffer
 
+        print(f"Chunk {chunk_number}")
         node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
         chunk_consensus = True
 
@@ -100,25 +118,30 @@ def process_buffer(dht):
                 node_votes[node_id].append(segment_votes[node_id])
             chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
 
-        print(f"Data Chunk {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
+        for node_id, votes in node_votes.items():
+            print(f"Node {node_id} Votes: {votes}")
+
+        print(f"Chunk {chunk_number} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
 
 # Binance WebSocket message processing function
 def process_binance_message(ws_message):
     global DATA_BUFFER
     message_data = json.loads(ws_message)
 
-    # Assuming 'p' is the price in the trade message
     if 'p' in message_data:
         DATA_BUFFER += message_data['p']
-        print(f"Received trade price: {message_data['p']}, Buffer length: {len(DATA_BUFFER)}")
+        # Commented out to stop printing each received trade price
+        # print(f"Received trade price: {message_data['p']}, Buffer length: {len(DATA_BUFFER)}")
     else:
         print("No price field in the received message.")
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
     global exit_flag
-    while not exit_flag:
-        process_buffer(dht)
+    chunk_number = 0
+    while not exit_flag and chunk_number < number_of_chunks:
+        chunk_number += 1
+        process_buffer(dht, chunk_number)
         time.sleep(BUFFER_CHECK_FREQUENCY)
         if len(DATA_BUFFER) < CHUNK_SIZE:
             print("Waiting for data to pile up...")
