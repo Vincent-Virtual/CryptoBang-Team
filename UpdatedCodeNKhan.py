@@ -107,13 +107,12 @@ def process_binance_message(ws_message):
     global DATA_BUFFER
     message_data = json.loads(ws_message)
 
+    # Assuming 'p' is the price in the trade message
     if 'p' in message_data:
         DATA_BUFFER += message_data['p']
-        # Commented out to stop printing each received trade price
-        # print(f"Received trade price: {message_data['p']}, Buffer length: {len(DATA_BUFFER)}")
+        print(f"Received trade price: {message_data['p']}, Buffer length: {len(DATA_BUFFER)}")
     else:
         print("No price field in the received message.")
-
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
@@ -162,4 +161,3 @@ except KeyboardInterrupt:
     ws_thread.join()
 
 print("Program exited gracefully.")
-
