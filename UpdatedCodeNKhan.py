@@ -102,17 +102,18 @@ def process_buffer(dht):
 
         print(f"Data Chunk {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
 
-# WebSocket message processing function
-def process_websocket_message(ws_message):
+# Binance WebSocket message processing function
+def process_binance_message(ws_message):
     global DATA_BUFFER
     message_data = json.loads(ws_message)
 
-    print("Received WebSocket message:", ws_message[:200])  # Debugging
-    if 'text' in message_data:
-        DATA_BUFFER += message_data['text']
-        print("Current buffer length:", len(DATA_BUFFER))  # Debugging
+    if 'p' in message_data:
+        DATA_BUFFER += message_data['p']
+        # Commented out to stop printing each received trade price
+        # print(f"Received trade price: {message_data['p']}, Buffer length: {len(DATA_BUFFER)}")
     else:
-        print("No 'text' field in the received message.")
+        print("No price field in the received message.")
+
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
@@ -124,9 +125,9 @@ def check_buffer_size(dht):
             print("Waiting for data to pile up...")
     print("Exiting buffer check thread.")
 
-# WebSocket event handlers
+# Binance WebSocket event handlers
 def on_message(ws, message):
-    process_websocket_message(message)
+    process_binance_message(message)
 
 def on_error(ws, error):
     print("Error:", error)
@@ -135,22 +136,11 @@ def on_close(ws, close_status_code, close_msg):
     print("WebSocket closed")
 
 def on_open(ws):
-    print("WebSocket connection opened")
-    def run(*args):
-        ws.send(json.dumps({
-            "type": "hello",
-            "apikey": "ABD8F0C0-2F16-40F2-A33C-2B1A294873F9",
-            "subscribe_data_type": ["trade"],
-            "subscribe_filter_symbol_id": ["BITSTAMP_SPOT_BTC_USD", "BITFINEX_SPOT_BTC_USD"]
-        }))
-    threading.Thread(target=run).start()
+    print("WebSocket connection opened to Binance")
 
-# Set up WebSocket connection
-ws = websocket.WebSocketApp("wss://ws.coinapi.io/v1",
-                            on_message=on_message,
-                            on_error=on_error,
-                            on_close=on_close)
-ws.on_open = on_open
+# Set up Binance WebSocket connection
+binance_ws_url = "wss://stream.binance.com:9443/ws/btcusdt@trade"
+ws = websocket.WebSocketApp(binance_ws_url, on_message=on_message, on_error=on_error, on_close=on_close)
 
 # Run the WebSocket client and buffer checker in separate threads
 dht = DHT(public_key)
@@ -160,6 +150,7 @@ ws_thread.start()
 buffer_thread = threading.Thread(target=lambda: check_buffer_size(dht))
 buffer_thread.start()
 
+# Main loop for keeping the script running
 try:
     while True:  # Keep the main thread alive
         time.sleep(0.1)
@@ -171,3 +162,4 @@ except KeyboardInterrupt:
     ws_thread.join()
 
 print("Program exited gracefully.")
+
