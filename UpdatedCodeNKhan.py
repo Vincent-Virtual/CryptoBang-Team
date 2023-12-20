@@ -1,4 +1,7 @@
-import requests
+import websocket
+import json
+import threading
+import time
 import random
 import math
 import hashlib
@@ -10,9 +13,10 @@ from datetime import datetime
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
-CHUNK_SIZE = 100000 * 1  # 100KB
-NUMBER_OF_SEGMENTS = 7  # First 100, last 100, and 5 random 50-char segments
-NUMBER_OF_CHUNKS_TO_PROCESS = 3  # Number of chunks to process
+CHUNK_SIZE = 100 * 1  # Adjusted chunk size
+BUFFER_CHECK_FREQUENCY = 20  # Seconds
+DATA_BUFFER = ""  # Initialize data buffer
+exit_flag = False  # Flag for graceful exit
 
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -80,23 +84,12 @@ def segment_data(data, private_key):
 
     return segment_info
 
-# Stream Processing Function
-def process_stream(url, private_key):
-    response = requests.get(url, stream=True)
-    dht = DHT(public_key)
-    chunks_processed = 0
-
-    for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
-        if chunks_processed >= NUMBER_OF_CHUNKS_TO_PROCESS:
-            break
-
-        if len(chunk) < CHUNK_SIZE:
-            print(f"Chunk {chunks_processed + 1} is smaller than 100KB, stopping processing.\n")
-            break
-
-        data_chunk = chunk.decode("utf-8", errors='ignore')
-        segments_info = segment_data(data_chunk, private_key)
-        print(f"\nChunk {chunks_processed + 1}")
+# Function to process and clear the buffer
+def process_buffer(dht):
+    global DATA_BUFFER
+    if len(DATA_BUFFER) >= CHUNK_SIZE:
+        segments_info = segment_data(DATA_BUFFER[:CHUNK_SIZE], private_key)
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]  # Remove processed data from buffer
 
         node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
         chunk_consensus = True
@@ -107,14 +100,74 @@ def process_stream(url, private_key):
                 node_votes[node_id].append(segment_votes[node_id])
             chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
 
-        for node_id, votes in node_votes.items():
-            print(f"Node {node_id} Votes: {votes}")
-        print(f"Chunk {chunks_processed + 1} {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
-        chunks_processed += 1
+        print(f"Data Chunk {'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'}\n")
 
-# URL of the data stream
-data_url = 'https://www.gutenberg.org/files/1342/1342-0.txt'
+# WebSocket message processing function
+def process_websocket_message(ws_message):
+    global DATA_BUFFER
+    message_data = json.loads(ws_message)
 
-# Process the data stream
-process_stream(data_url, private_key)
+    print("Received WebSocket message:", ws_message[:200])  # Debugging
+    if 'text' in message_data:
+        DATA_BUFFER += message_data['text']
+        print("Current buffer length:", len(DATA_BUFFER))  # Debugging
+    else:
+        print("No 'text' field in the received message.")
 
+# Function to check buffer size periodically
+def check_buffer_size(dht):
+    global exit_flag
+    while not exit_flag:
+        process_buffer(dht)
+        time.sleep(BUFFER_CHECK_FREQUENCY)
+        if len(DATA_BUFFER) < CHUNK_SIZE:
+            print("Waiting for data to pile up...")
+    print("Exiting buffer check thread.")
+
+# WebSocket event handlers
+def on_message(ws, message):
+    process_websocket_message(message)
+
+def on_error(ws, error):
+    print("Error:", error)
+
+def on_close(ws, close_status_code, close_msg):
+    print("WebSocket closed")
+
+def on_open(ws):
+    print("WebSocket connection opened")
+    def run(*args):
+        ws.send(json.dumps({
+            "type": "hello",
+            "apikey": "ABD8F0C0-2F16-40F2-A33C-2B1A294873F9",
+            "subscribe_data_type": ["trade"],
+            "subscribe_filter_symbol_id": ["BITSTAMP_SPOT_BTC_USD", "BITFINEX_SPOT_BTC_USD"]
+        }))
+    threading.Thread(target=run).start()
+
+# Set up WebSocket connection
+ws = websocket.WebSocketApp("wss://ws.coinapi.io/v1",
+                            on_message=on_message,
+                            on_error=on_error,
+                            on_close=on_close)
+ws.on_open = on_open
+
+# Run the WebSocket client and buffer checker in separate threads
+dht = DHT(public_key)
+ws_thread = threading.Thread(target=ws.run_forever)
+ws_thread.start()
+
+buffer_thread = threading.Thread(target=lambda: check_buffer_size(dht))
+buffer_thread.start()
+
+try:
+    while True:  # Keep the main thread alive
+        time.sleep(0.1)
+except KeyboardInterrupt:
+    print("Exiting program...")
+    exit_flag = True
+    ws.close()
+    buffer_thread.join()
+    ws_thread.join()
+
+print("Program exited gracefully.")
