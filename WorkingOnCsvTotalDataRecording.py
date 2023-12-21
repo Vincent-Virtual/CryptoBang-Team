@@ -30,9 +30,9 @@ workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
 worksheet = workbook.add_worksheet()
 
 # Add headers to the matrix data file
-headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
-           'VERIFICATION PERCENTAGE PER NODE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
-           'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
+headers = ['CHUNK #', 'NODE #','HEAD', 'SEG 1', 'SEG 2', 'SEG 3', 'SEG 4', 'SEG 5', 'TAIL',
+           'PERCENTAGE', 'OUTCOME','SIZE', 'HASHES',
+           'SIGNATURE', 'TIMESTAMP', 'STATUS']
 
 # Write headers to the worksheet
 for col_num, header in enumerate(headers):
@@ -51,12 +51,11 @@ public_key = private_key.public_key()
 
 
 # File Initializations
-csv_filename = 'chunk_verification_records.csv'
+csv_filename = 'chunk_data_records.csv'
 with open(csv_filename, 'w', newline='') as file:
     writer = csv.writer(file)
-    writer.writerow(["Chunk Number", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+    writer.writerow(["CHUNK #", "TIMESTAMP", "DATA", "SIZE", "SIGNATURE", "OUTCOME", "PERCENTAGE"])
 
-\
 
 # Node Class
 class Node:
