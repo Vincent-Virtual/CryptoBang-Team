@@ -39,7 +39,7 @@ public_key = private_key.public_key()
 csv_filename = 'data.csv'
 with open(csv_filename, 'w', newline='') as file:
     writer = csv.writer(file)
-    writer.writerow(["Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+    writer.writerow(["Chunk #", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
 
 # Node Class
 class Node:
@@ -83,9 +83,11 @@ class DHT:
         return {node.node_id: node.vote(segment, segment_hash, self.public_key, signature, timestamp) for node in self.nodes}
 
 # Function to segment the data
+# Function to segment the data
 def segment_data(data, private_key):
-    segment_length = len(data) // NUMBER_OF_SEGMENTS
-    segments = [data[i:i + segment_length] for i in range(0, len(data), segment_length)]
+    head = data[:CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2)]
+    tail = data[-CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2):]
+    segments = [head] + [data[i:i + CHUNK_SIZE // NUMBER_OF_SEGMENTS] for i in range(CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2), len(data) - CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2), CHUNK_SIZE // NUMBER_OF_SEGMENTS)] + [tail]
 
     segment_info = []
     for segment in segments:
@@ -104,11 +106,12 @@ def segment_data(data, private_key):
     return segment_info
 
 # Function to save chunk data to CSV
-def save_to_csv(timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage):
+def save_to_csv(chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage):
     with open(csv_filename, 'a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
+        writer.writerow([chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
 
+# Function to process and clear the buffer
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
     global DATA_BUFFER
@@ -122,20 +125,19 @@ def process_buffer(dht, chunk_number):
         chunk_consensus = True
         total_true_votes = 0
 
+        # Removed individual segment vote printouts based on feedback
         for segment_index, (segment, segment_hash, signature, timestamp) in enumerate(segments_info):
             segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
-            print(f"Segment {segment_index + 1} Votes:", segment_votes)
             for node_id, vote in segment_votes.items():
                 node_votes[node_id].append(vote)
-                if vote:
-                    total_true_votes += 1
-            chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
+                total_true_votes += vote
 
+        chunk_consensus = all(sum(votes) > len(votes) / 2 for votes in node_votes.values())
+        true_vote_percentage = (total_true_votes / (NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2))) * 100
+
+        print(f"Chunk {chunk_number}")
         for node_id, votes in node_votes.items():
             print(f"Node {node_id} Votes: {votes}")
-
-        total_votes = len(segments_info) * NUMBER_OF_NODES
-        true_vote_percentage = (total_true_votes / total_votes) * 100
 
         # Using print_colored based on the outcome
         if chunk_consensus:
@@ -155,8 +157,7 @@ def process_buffer(dht, chunk_number):
         chunk_signature_readable = chunk_signature.hex()
 
         # Save chunk data to CSV
-        save_to_csv(datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully', true_vote_percentage)
-
+        save_to_csv(chunk_number, datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully', true_vote_percentage)
 # Function to check buffer size periodically
 def check_buffer_size(dht):
     global exit_flag
