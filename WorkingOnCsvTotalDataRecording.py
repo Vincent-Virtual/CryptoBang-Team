@@ -180,28 +180,19 @@ def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verific
 
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
-    global DATA_BUFFER, start_row, NUMBER_OF_SEGMENTS, CHUNK_SIZE
+    global DATA_BUFFER
     if len(DATA_BUFFER) >= CHUNK_SIZE:
-        # Define head, middle, and tail segments
-        head_segment = DATA_BUFFER[:50]
-        tail_segment = DATA_BUFFER[-50:]
-        middle_buffer = DATA_BUFFER[50:-50]  # Buffer without head and tail
+        # Process the DATA_BUFFER to get the segments info
+        segments_info = segment_data(DATA_BUFFER, private_key)
 
-        # Divide the middle buffer into segments
-        middle_segments = [middle_buffer[i:i + SEGMENT_LENGTH] for i in range(0, len(middle_buffer), SEGMENT_LENGTH)]
-        # Make sure we have the exact number of middle segments needed
-        middle_segments = middle_segments[:NUMBER_OF_SEGMENTS]
-
-        # Process each segment to get hashes and signatures
-        segments_info = [segment_data(head_segment, private_key)] + \
-                        [segment_data(seg, private_key) for seg in middle_segments] + \
-                        [segment_data(tail_segment, private_key)]
-
-       # Voting by nodes
+        # Voting by nodes
         node_votes = {}
         for node_id in range(NUMBER_OF_NODES):
-            # Extract just the segment data (segment_info[0]) to pass to the vote function
-            node_votes[node_id] = [dht.nodes[node_id].vote(segment_info[0], segment_info[1], public_key, segment_info[2], segment_info[3]) for segment_info in segments_info]
+            node_votes[node_id] = []
+            for segment_info in segments_info:
+                segment, segment_hash, signature, timestamp = segment_info
+                vote = dht.nodes[node_id].vote(segment, segment_hash, public_key, signature, timestamp)
+                node_votes[node_id].append(vote)
 
         # Calculate verification outcome and percentage
         total_true_votes = sum(vote for votes in node_votes.values() for vote in votes)
@@ -218,7 +209,7 @@ def process_buffer(dht, chunk_number):
         # Generate the matrix table for the chunk
         generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
 
-        # Update DATA_BUFFER for the next chunk
+        # Clear the DATA_BUFFER for the next chunk
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
 # Function to check buffer size periodically
