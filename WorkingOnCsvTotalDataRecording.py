@@ -3,13 +3,14 @@ import json
 import threading
 import time
 import random
-import xlsxwriter
 import math
 import hashlib
 import csv
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
+import xlsxwriter
+
 
 # Constants
 NUMBER_OF_NODES = 10
@@ -23,9 +24,26 @@ exit_flag = False  # Flag for graceful exit
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 
+# Define global workbook and worksheet
+workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
+worksheet = workbook.add_worksheet()
+
+# Initialize the Excel file with headers only once
+headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
+           'VERIFICATION PERCENTAGE PER NODE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
+           'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
+
+# Write headers to the worksheet
+for i, header in enumerate(headers):
+    worksheet.write(i, 0, header)
+
+# Start row for the first chunk
+start_row = 1
+
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
+
 
 
 # CSV File Initialization
@@ -104,34 +122,46 @@ def save_to_csv(timestamp, chunk_data, chunk_size, digital_signature, outcome, t
         writer = csv.writer(file)
         writer.writerow([timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
 
-# Additional function to generate the matrix table Excel file
-def generate_matrix_table(chunk_number, node_votes, dht):
-    # Create a workbook and add a worksheet
-    workbook = xlsxwriter.Workbook(f'matrix_table_chunk_{chunk_number}.xlsx')
-    worksheet = workbook.add_worksheet()
+def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
+    global start_row
+    
+    # Write Chunk number
+    worksheet.write(start_row, 0, f'Chunk {chunk_number}')
 
-    # Define headers for the columns and rows
-    headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
-               'VERIFICATION PERCENTAGE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
-               'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
-    
-    # Write headers
-    for i, header in enumerate(headers):
-        worksheet.write(i, 0, header)
-    
-    # Write Node IDs
-    for i in range(NUMBER_OF_NODES):
-        worksheet.write(0, i+1, f'NODE {i}')
-    
-    # Write votes and statuses for each segment
-    for segment_index, votes in enumerate(zip(*node_votes.values()), start=1):
-        for node_index, vote in enumerate(votes, start=1):
-            worksheet.write(segment_index, node_index, str(vote))
-            # Fill in other details like verification percentage, outcome, etc.
-            # This part is omitted for brevity, and should be filled with actual values
-    
-    # Close the workbook
-    workbook.close()
+    # Fill the matrix with votes and other details
+    for i, node_id in enumerate(range(NUMBER_OF_NODES)):
+        # Write Node ID
+        worksheet.write(0, i+1, f'NODE {node_id}')
+        # Votes for each segment
+        for j, vote in enumerate(node_votes[node_id]):
+            # Adjust index for HEAD and TAIL segments
+            segment_label_index = start_row + j if j < NUMBER_OF_SEGMENTS else start_row + 7
+            worksheet.write(segment_label_index, i+1, 'True' if vote else 'False')
+
+        # Calculate verification percentage per node
+        positive_votes = node_votes[node_id].count(True)
+        verification_percentage_per_node = (positive_votes / NUMBER_OF_SEGMENTS) * 100
+        worksheet.write(start_row + 8, i+1, f"{verification_percentage_per_node:.2f}%")
+
+        # Verification outcome, size, hashes, signatures, and timestamps
+        worksheet.write(start_row + 9, i+1, chunk_verification_outcome)
+        worksheet.write(start_row + 10, i+1, CHUNK_SIZE)
+        
+        # Assume segments_info is a list of tuples as before
+        hashes, signatures, timestamps = zip(*[(info[1], info[2].hex(), info[3]) for info in segments_info])
+        worksheet.write(start_row + 11, i+1, ', '.join(hashes))
+        worksheet.write(start_row + 12, i+1, ', '.join(signatures))
+        worksheet.write(start_row + 13, i+1, ', '.join(map(str, timestamps)))
+
+        # Node status
+        if chunk_verification_outcome == 'Verified Successfully':
+            worksheet.write(start_row + 14, i+1, 'GOOD' if positive_votes >= math.ceil(0.85 * NUMBER_OF_SEGMENTS) else 'FAULTY')
+        else:
+            worksheet.write(start_row + 14, i+1, 'GOOD' if positive_votes < math.ceil(0.85 * NUMBER_OF_SEGMENTS) else 'FAULTY')
+
+    # Update start_row for the next chunk
+    start_row += len(headers)
+
 
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
@@ -173,8 +203,9 @@ def process_buffer(dht, chunk_number):
         # Save chunk data to CSV
         save_to_csv(datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, chunk_verification_outcome, true_vote_percentage)
         
-        # After processing each chunk, call the function to create the matrix table
-        generate_matrix_table(chunk_number, node_votes, dht)
+         # Call the function to create the matrix table at the end of processing each chunk
+        generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
+
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
@@ -241,3 +272,6 @@ buffer_thread.join()
 ws_thread.join()
 
 print("Program exited gracefully.")
+
+# Do not forget to close the workbook after processing all chunks
+workbook.close()
