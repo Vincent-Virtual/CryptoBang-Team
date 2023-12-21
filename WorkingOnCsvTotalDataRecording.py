@@ -6,9 +6,13 @@ import random
 import math
 import hashlib
 import csv
+import pandas as pd 
+import os
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
+
+VERIFICATION_THRESHOLD = 0.7  # 70% of True votes required for successful verification
 
 # Constants
 NUMBER_OF_NODES = 10
@@ -21,6 +25,38 @@ exit_flag = False  # Flag for graceful exit
 
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
+
+import os
+
+def save_to_excel(chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage):
+    # Create a DataFrame for the chunk data
+    df = pd.DataFrame({
+        "Chunk #": [chunk_number],
+        "Timestamp": [timestamp],
+        "Chunk Data": [chunk_data],
+        "Chunk Size": [chunk_size],
+        "Digital Signature": [digital_signature],
+        "Verification Outcome": [outcome],
+        "True Vote Percentage": [true_vote_percentage]
+    })
+    
+    # Define the Excel writer
+    excel_file = 'data.xlsx'
+    sheet_name = 'Sheet1'
+    
+    # Check if the Excel file already exists
+    if not os.path.isfile(excel_file):
+        with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    else:
+        # If the file exists, then open it and append data without adding header
+        with pd.ExcelWriter(excel_file, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
+            # Get the last row in the existing Excel sheet
+            # If there is no sheet, then index is 0 by default
+            startrow = writer.sheets[sheet_name].max_row if sheet_name in writer.sheets else 0
+            
+            # Write data starting from the last row
+            df.to_excel(writer, sheet_name=sheet_name, startrow=startrow, index=False, header=False)
 
 # Function to print colored text in the terminal
 def print_colored(text, color):
@@ -112,38 +148,35 @@ def save_to_csv(chunk_number, timestamp, chunk_data, chunk_size, digital_signatu
         writer.writerow([chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
 
 # Function to process and clear the buffer
-# Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
-    global DATA_BUFFER
+    global DATA_BUFFER, VERIFICATION_THRESHOLD
     if len(DATA_BUFFER) >= CHUNK_SIZE:
         chunk_data = DATA_BUFFER[:CHUNK_SIZE]
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
-
         print(f"Processing Chunk {chunk_number}...")
         segments_info = segment_data(chunk_data, private_key)
         node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
         chunk_consensus = True
         total_true_votes = 0
 
-        # Removed individual segment vote printouts based on feedback
         for segment_index, (segment, segment_hash, signature, timestamp) in enumerate(segments_info):
             segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
             for node_id, vote in segment_votes.items():
                 node_votes[node_id].append(vote)
-                total_true_votes += vote
-
-        chunk_consensus = all(sum(votes) > len(votes) / 2 for votes in node_votes.values())
-        true_vote_percentage = (total_true_votes / (NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2))) * 100
+                total_true_votes += int(vote)
 
         print(f"Chunk {chunk_number}")
         for node_id, votes in node_votes.items():
             print(f"Node {node_id} Votes: {votes}")
 
-        # Using print_colored based on the outcome
-        if chunk_consensus:
-            print_colored(f"Chunk {chunk_number} Verified Successfully ({true_vote_percentage:.2f}% true)", 'green')
-        else:
-            print_colored(f"Chunk {chunk_number} Verified Unsuccessfully ({true_vote_percentage:.2f}% true)", 'red')
+        # Calculate the consensus and true vote percentage
+        total_votes = NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2)
+        true_vote_percentage = (total_true_votes / total_votes) * 100
+        chunk_consensus = true_vote_percentage >= (VERIFICATION_THRESHOLD * 100)
+
+        # Print results with colored text
+        consensus_text = 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'
+        print_colored(f"Chunk {chunk_number} {consensus_text} ({true_vote_percentage:.2f}% true)", 'green' if chunk_consensus else 'red')
 
         # Compute digital signature for the entire chunk
         chunk_signature = private_key.sign(
@@ -156,8 +189,10 @@ def process_buffer(dht, chunk_number):
         )
         chunk_signature_readable = chunk_signature.hex()
 
-        # Save chunk data to CSV
-        save_to_csv(chunk_number, datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully', true_vote_percentage)
+        # Save chunk data to Excel
+        save_to_excel(chunk_number, datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, consensus_text, true_vote_percentage)
+
+
 # Function to check buffer size periodically
 def check_buffer_size(dht):
     global exit_flag
