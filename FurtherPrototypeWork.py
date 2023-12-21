@@ -6,6 +6,7 @@ import random
 import math
 import hashlib
 import csv
+import xlsxwriter
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
@@ -32,6 +33,25 @@ csv_filename = 'data.csv'
 with open(csv_filename, 'w', newline='') as file:
     writer = csv.writer(file)
     writer.writerow(["Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+
+# Matrix Header Initialisation
+headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
+           'VERIFICATION PERCENTAGE PER NODE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
+           'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
+
+workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
+worksheet = workbook.add_worksheet()
+
+# Function to add headers to the Excel matrix file
+def add_headers_to_excel(worksheet, headers):
+    for col_num, header in enumerate(headers):
+        worksheet.write(0, col_num, header)
+
+# Call this function right after worksheet initialization
+add_headers_to_excel(worksheet, headers)
+
+# Start row for the first chunk
+start_row = 1  # Because we have headers in row 0 now
 
 # Node Class
 class Node:
@@ -105,7 +125,7 @@ def save_to_csv(timestamp, chunk_data, chunk_size, digital_signature, outcome, t
 
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
-    global DATA_BUFFER
+    global DATA_BUFFER, start_row
     if len(DATA_BUFFER) >= CHUNK_SIZE:
         chunk_data = DATA_BUFFER[:CHUNK_SIZE]
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
@@ -116,7 +136,8 @@ def process_buffer(dht, chunk_number):
         chunk_consensus = True
         total_true_votes = 0
 
-        for segment, segment_hash, signature, timestamp in segments_info:
+        for segment_info in segments_info:
+            segment, segment_hash, signature, timestamp = segment_info  # Unpack the tuple
             segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
             for node_id in range(NUMBER_OF_NODES):
                 node_votes[node_id].append(segment_votes[node_id])
@@ -128,6 +149,9 @@ def process_buffer(dht, chunk_number):
         true_vote_percentage = (total_true_votes / total_votes) * 100
         chunk_verification_outcome = 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'
         print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true)")
+
+        # Generate the matrix table for the chunk
+        generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
 
         # Compute digital signature for the entire chunk
         chunk_signature = private_key.sign(
@@ -142,6 +166,8 @@ def process_buffer(dht, chunk_number):
 
         # Save chunk data to CSV
         save_to_csv(datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, chunk_verification_outcome, true_vote_percentage)
+    else:
+        print(f"Not enough data for Chunk {chunk_number}.")
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):

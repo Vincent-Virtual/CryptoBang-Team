@@ -12,34 +12,30 @@ from datetime import datetime
 import xlsxwriter
 
 
-# Constants
+# Global Variable
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
 FAULTY_NODE_CHANCE = 0.5  # 50% chance for faulty nodes to vote true/false
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
 CHUNK_SIZE = 500  # Adjusted chunk size
-BUFFER_CHECK_FREQUENCY = 20  # Seconds
+BUFFER_CHECK_FREQUENCY = 5  # Seconds
 DATA_BUFFER = ""  # Initialize data buffer
 exit_flag = False  # Flag for graceful exit
-
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
 SEGMENT_LENGTH = 20 
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 
-# Define global workbook and worksheet
+# Define global workbook and worksheet for matrix data
 workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
 worksheet = workbook.add_worksheet()
 
-# Initialize the Excel file with headers only once
+# Add headers to the matrix data file
 headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
-           'VERIFICATION PERCENTAGE PER NODE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
+           'VERIFICATION OUTCOME', 'VERIFICATION PERCENTAGE PER NODE',  'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
            'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
 
-# Write headers to the worksheet
-for i, header in enumerate(headers):
-    worksheet.write(i, 0, header)
-
-# Start row for the first chunk
+for col_num, header in enumerate(headers):
+    worksheet.write(0, col_num, header)
 start_row = 1
 
 # Generate RSA keys (private and public)
@@ -48,11 +44,13 @@ public_key = private_key.public_key()
 
 
 
-# CSV File Initialization
-csv_filename = 'data.csv'
+# File Initializations
+csv_filename = 'chunk_verification_records.csv'
 with open(csv_filename, 'w', newline='') as file:
     writer = csv.writer(file)
-    writer.writerow(["Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+    writer.writerow(["Chunk Number", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+
+csv_filename = 'chunk_verification_records.csv'
 
 # Node Class
 class Node:
@@ -216,7 +214,7 @@ def process_buffer(dht, chunk_number):
 
         # Generate Data Chunk Table
         save_chunk_to_csv(csv_filename, chunk_number, DATA_BUFFER[:CHUNK_SIZE], node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
-    
+        
         # Generate the matrix table for the chunk
         generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
 
