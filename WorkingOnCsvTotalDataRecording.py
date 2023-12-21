@@ -15,6 +15,7 @@ import xlsxwriter
 # Constants
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
+FAULTY_NODE_CHANCE = 0.5  # 50% chance for faulty nodes to vote true/false
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
 CHUNK_SIZE = 500  # Adjusted chunk size
 BUFFER_CHECK_FREQUENCY = 20  # Seconds
@@ -22,6 +23,7 @@ DATA_BUFFER = ""  # Initialize data buffer
 exit_flag = False  # Flag for graceful exit
 
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
+SEGMENT_LENGTH = 20 
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 
 # Define global workbook and worksheet
@@ -95,11 +97,25 @@ class DHT:
 
 # Function to segment the data
 def segment_data(data, private_key):
-    if len(data) < 250:
-        return []
+    # Define head and tail segments
+    head = data[:50]  # First 50 characters for head segment
+    tail = data[-50:]  # Last 50 characters for tail segment
 
-    segments = [data[i:i + CHUNK_SIZE // NUMBER_OF_SEGMENTS] for i in range(0, len(data), CHUNK_SIZE // NUMBER_OF_SEGMENTS)]
+    # Calculate the length of the entire middle section
+    middle_section_length = CHUNK_SIZE - (len(head) + len(tail))
+    segment_length = middle_section_length // NUMBER_OF_SEGMENTS
 
+    # Define middle segments
+    middle_start = len(head)
+    segments = [head]
+    for _ in range(NUMBER_OF_SEGMENTS):
+        segments.append(data[middle_start:middle_start + segment_length])
+        middle_start += segment_length
+
+    # Add the tail segment
+    segments.append(tail)
+
+    # Generate hash, signature, and timestamp for each segment
     segment_info = []
     for segment in segments:
         segment_hash = hashlib.sha256(segment.encode()).hexdigest()
@@ -123,89 +139,87 @@ def save_to_csv(timestamp, chunk_data, chunk_size, digital_signature, outcome, t
         writer.writerow([timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
 
 def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
-    global start_row
-    
-    # Write Chunk number
-    worksheet.write(start_row, 0, f'Chunk {chunk_number}')
+    global worksheet, start_row
 
-    # Fill the matrix with votes and other details
-    for i, node_id in enumerate(range(NUMBER_OF_NODES)):
-        # Write Node ID
-        worksheet.write(0, i+1, f'NODE {node_id}')
-        # Votes for each segment
-        for j, vote in enumerate(node_votes[node_id]):
-            # Adjust index for HEAD and TAIL segments
-            segment_label_index = start_row + j if j < NUMBER_OF_SEGMENTS else start_row + 7
-            worksheet.write(segment_label_index, i+1, 'True' if vote else 'False')
+    # Write Chunk number for all nodes
+    for i in range(NUMBER_OF_NODES):
+        worksheet.write(start_row + i, 0, f'Chunk {chunk_number}')
 
-        # Calculate verification percentage per node
+    # Write the data for each node
+    for node_id in range(NUMBER_OF_NODES):
+        worksheet.write(start_row + node_id, 1, f'NODE {node_id}')  # Node ID
+
+        # Write True/False for the head segment, middle segments, and tail segment
+        worksheet.write(start_row + node_id, 2, 'True' if node_votes[node_id][0] else 'False')  # Head segment
+        for segment_index, vote in enumerate(node_votes[node_id][1:-1], start=3):  # Middle segments
+            worksheet.write(start_row + node_id, segment_index, 'True' if vote else 'False')
+        worksheet.write(start_row + node_id, 3 + NUMBER_OF_SEGMENTS, 'True' if node_votes[node_id][-1] else 'False')  # Tail segment
+
+        # Write the verification percentage per node
         positive_votes = node_votes[node_id].count(True)
-        verification_percentage_per_node = (positive_votes / NUMBER_OF_SEGMENTS) * 100
-        worksheet.write(start_row + 8, i+1, f"{verification_percentage_per_node:.2f}%")
+        verification_percentage_per_node = (positive_votes / (NUMBER_OF_SEGMENTS + 2)) * 100  # Including head and tail
+        worksheet.write(start_row + node_id, 4 + NUMBER_OF_SEGMENTS, f"{verification_percentage_per_node:.2f}%")
 
-        # Verification outcome, size, hashes, signatures, and timestamps
-        worksheet.write(start_row + 9, i+1, chunk_verification_outcome)
-        worksheet.write(start_row + 10, i+1, CHUNK_SIZE)
-        
-        # Assume segments_info is a list of tuples as before
-        hashes, signatures, timestamps = zip(*[(info[1], info[2].hex(), info[3]) for info in segments_info])
-        worksheet.write(start_row + 11, i+1, ', '.join(hashes))
-        worksheet.write(start_row + 12, i+1, ', '.join(signatures))
-        worksheet.write(start_row + 13, i+1, ', '.join(map(str, timestamps)))
+        # Write the verification outcome, size of data received, hashes, signatures, timestamps, and node status
+        worksheet.write(start_row + node_id, 5 + NUMBER_OF_SEGMENTS, chunk_verification_outcome)
+        worksheet.write(start_row + node_id, 6 + NUMBER_OF_SEGMENTS, CHUNK_SIZE)
+        # Combine hashes, signatures, and timestamps from segments_info
+        hashes = ', '.join(info[1] for info in segments_info)
+        signatures = ', '.join(info[2].hex() for info in segments_info)
+        timestamps = ', '.join(str(info[3]) for info in segments_info)
+        worksheet.write(start_row + node_id, 7 + NUMBER_OF_SEGMENTS, hashes)
+        worksheet.write(start_row + node_id, 8 + NUMBER_OF_SEGMENTS, signatures)
+        worksheet.write(start_row + node_id, 9 + NUMBER_OF_SEGMENTS, timestamps)
+        # Determine node status based on the majority vote
+        status = 'GOOD' if positive_votes >= math.ceil((NUMBER_OF_SEGMENTS + 2) * 0.85) else 'FAULTY'
+        worksheet.write(start_row + node_id, 10 + NUMBER_OF_SEGMENTS, status)
 
-        # Node status
-        if chunk_verification_outcome == 'Verified Successfully':
-            worksheet.write(start_row + 14, i+1, 'GOOD' if positive_votes >= math.ceil(0.85 * NUMBER_OF_SEGMENTS) else 'FAULTY')
-        else:
-            worksheet.write(start_row + 14, i+1, 'GOOD' if positive_votes < math.ceil(0.85 * NUMBER_OF_SEGMENTS) else 'FAULTY')
-
-    # Update start_row for the next chunk
-    start_row += len(headers)
+    # After writing all nodes, increment start_row to skip to the next chunk's start
+    start_row += NUMBER_OF_NODES
 
 
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
-    global DATA_BUFFER
+    global DATA_BUFFER, start_row, NUMBER_OF_SEGMENTS, CHUNK_SIZE
     if len(DATA_BUFFER) >= CHUNK_SIZE:
-        chunk_data = DATA_BUFFER[:CHUNK_SIZE]
-        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
+        # Define head, middle, and tail segments
+        head_segment = DATA_BUFFER[:50]
+        tail_segment = DATA_BUFFER[-50:]
+        middle_buffer = DATA_BUFFER[50:-50]  # Buffer without head and tail
 
-        print(f"Chunk {chunk_number}")
-        segments_info = segment_data(chunk_data, private_key)
-        node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
-        chunk_consensus = True
-        total_true_votes = 0
+        # Divide the middle buffer into segments
+        middle_segments = [middle_buffer[i:i + SEGMENT_LENGTH] for i in range(0, len(middle_buffer), SEGMENT_LENGTH)]
+        # Make sure we have the exact number of middle segments needed
+        middle_segments = middle_segments[:NUMBER_OF_SEGMENTS]
 
-        for segment, segment_hash, signature, timestamp in segments_info:
-            segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
-            for node_id in range(NUMBER_OF_NODES):
-                node_votes[node_id].append(segment_votes[node_id])
-                if segment_votes[node_id]:
-                    total_true_votes += 1
-            chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
+        # Process each segment to get hashes and signatures
+        segments_info = [segment_data(head_segment, private_key)] + \
+                        [segment_data(seg, private_key) for seg in middle_segments] + \
+                        [segment_data(tail_segment, private_key)]
 
-        total_votes = len(segments_info) * NUMBER_OF_NODES
+       # Voting by nodes
+        node_votes = {}
+        for node_id in range(NUMBER_OF_NODES):
+            # Extract just the segment data (segment_info[0]) to pass to the vote function
+            node_votes[node_id] = [dht.nodes[node_id].vote(segment_info[0], segment_info[1], public_key, segment_info[2], segment_info[3]) for segment_info in segments_info]
+
+        # Calculate verification outcome and percentage
+        total_true_votes = sum(vote for votes in node_votes.values() for vote in votes)
+        total_votes = (NUMBER_OF_SEGMENTS + 2) * NUMBER_OF_NODES  # +2 for head and tail segments
         true_vote_percentage = (total_true_votes / total_votes) * 100
-        chunk_verification_outcome = 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'
+        chunk_verification_outcome = 'Verified Successfully' if total_true_votes >= math.ceil(total_votes * 0.7) else 'Verified Unsuccessfully'
+
+        # Output to the terminal
+        print(f"Chunk {chunk_number}")
+        for node_id, votes in node_votes.items():
+            print(f"Node {node_id} Votes: {votes}")
         print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true)")
 
-        # Compute digital signature for the entire chunk
-        chunk_signature = private_key.sign(
-            chunk_data.encode(),
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
-        )
-        chunk_signature_readable = chunk_signature.hex()
-
-        # Save chunk data to CSV
-        save_to_csv(datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, chunk_verification_outcome, true_vote_percentage)
-        
-         # Call the function to create the matrix table at the end of processing each chunk
+        # Generate the matrix table for the chunk
         generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
 
+        # Update DATA_BUFFER for the next chunk
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
