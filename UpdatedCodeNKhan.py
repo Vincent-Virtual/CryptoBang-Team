@@ -11,48 +11,52 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
 import xlsxwriter
 
-
 # Constants
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
-FAULTY_NODE_CHANCE = 0.5  # 50% chance for faulty nodes to vote true/false
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
 CHUNK_SIZE = 500  # Adjusted chunk size
-BUFFER_CHECK_FREQUENCY = 20  # Seconds
+BUFFER_CHECK_FREQUENCY = 5  # Seconds
+NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
+TOTAL_VOTES = NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2)
+MIN_APPROVALS = 2 * (TOTAL_VOTES // 3) + 1
+SEGMENT_LENGTH = 20 
+NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 DATA_BUFFER = ""  # Initialize data buffer
 exit_flag = False  # Flag for graceful exit
 
-NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
-SEGMENT_LENGTH = 20 
-NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
-
-# Define global workbook and worksheet
+# Define global workbook and worksheet for matrix data
 workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
 worksheet = workbook.add_worksheet()
 
-# Initialize the Excel file with headers only once
+# Add headers to the matrix data file
 headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
            'VERIFICATION PERCENTAGE PER NODE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
            'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
 
 # Write headers to the worksheet
-for i, header in enumerate(headers):
-    worksheet.write(i, 0, header)
+for col_num, header in enumerate(headers):
+    worksheet.write(0, col_num, header)
 
 # Start row for the first chunk
-start_row = 1
+start_row = 1  # Global declaration
 
+# Write headers to the worksheet, across the first row
+for col_num, header in enumerate(headers):
+    worksheet.write(0, col_num, header)
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
 
 
-# CSV File Initialization
-csv_filename = 'data.csv'
+# File Initializations
+csv_filename = 'chunk_verification_records.csv'
 with open(csv_filename, 'w', newline='') as file:
     writer = csv.writer(file)
-    writer.writerow(["Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+    writer.writerow(["Chunk Number", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+
+\
 
 # Node Class
 class Node:
@@ -146,8 +150,10 @@ def save_chunk_to_csv(filename, chunk_number, chunk_data, node_votes, segments_i
 
 # Name for the first Excel file
 csv_filename = 'chunk_data_records.csv'
+
+# Function to generate matrix table
 def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
-    global worksheet, start_row
+    global worksheet, start_row  # Declare start_row as global
 
     # Write Chunk number for all nodes
     for i in range(NUMBER_OF_NODES):
@@ -188,38 +194,34 @@ def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verific
 
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
-    global DATA_BUFFER
+    global DATA_BUFFER, start_row
     if len(DATA_BUFFER) >= CHUNK_SIZE:
-        # Process the DATA_BUFFER to get the segments info
-        segments_info = segment_data(DATA_BUFFER, private_key)
+        chunk_data = DATA_BUFFER[:CHUNK_SIZE]
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
-        # Voting by nodes
-        node_votes = {}
+        segments_info = segment_data(chunk_data, private_key)
+        node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
+
         for node_id in range(NUMBER_OF_NODES):
-            node_votes[node_id] = []
             for segment_info in segments_info:
                 segment, segment_hash, signature, timestamp = segment_info
                 vote = dht.nodes[node_id].vote(segment, segment_hash, public_key, signature, timestamp)
                 node_votes[node_id].append(vote)
 
-        # Calculate verification outcome and percentage
         total_true_votes = sum(vote for votes in node_votes.values() for vote in votes)
-        total_votes = (NUMBER_OF_SEGMENTS + 2) * NUMBER_OF_NODES  # +2 for head and tail segments
-        true_vote_percentage = (total_true_votes / total_votes) * 100
-        chunk_verification_outcome = 'Verified Successfully' if total_true_votes >= math.ceil(total_votes * 0.7) else 'Verified Unsuccessfully'
+        true_vote_percentage = (total_true_votes / TOTAL_VOTES) * 100
+        chunk_verification_outcome = 'Verified Successfully' if total_true_votes >= MIN_APPROVALS else 'Verified Unsuccessfully'
 
         # Output to the terminal
-        print(f"Chunk {chunk_number}")
+        print(f"Chunk {chunk_number} Processing Results:")
         for node_id, votes in node_votes.items():
             print(f"Node {node_id} Votes: {votes}")
-        print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true)")
+        print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true votes)")
 
-        # Generate Data Chunk Table
-        save_chunk_to_csv(csv_filename, chunk_number, DATA_BUFFER[:CHUNK_SIZE], node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
-    
-        # Generate the matrix table for the chunk
+        # Generate Data Chunk Table and Matrix Table
+        save_chunk_to_csv(csv_filename, chunk_number, chunk_data, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
         generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
-
+        
         # Clear the DATA_BUFFER for the next chunk
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
