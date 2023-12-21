@@ -133,11 +133,19 @@ def segment_data(data, private_key):
     return segment_info
 
 # Function to save chunk data to CSV
-def save_to_csv(timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage):
-    with open(csv_filename, 'a', newline='') as file:
+def save_chunk_to_csv(filename, chunk_number, chunk_data, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
+    with open(filename, 'a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
+        # Write the headers if the file is empty
+        if file.tell() == 0:
+            writer.writerow(["Chunk Number", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+        # Write the chunk data
+        timestamp = datetime.now().timestamp()
+        digital_signature = ','.join(info[2].hex() for info in segments_info)  # Assuming this is how you get the digital signature
+        writer.writerow([chunk_number, timestamp, chunk_data, CHUNK_SIZE, digital_signature, chunk_verification_outcome, f"{true_vote_percentage:.2f}%"])
 
+# Name for the first Excel file
+csv_filename = 'chunk_data_records.csv'
 def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
     global worksheet, start_row
 
@@ -206,6 +214,9 @@ def process_buffer(dht, chunk_number):
             print(f"Node {node_id} Votes: {votes}")
         print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true)")
 
+        # Generate Data Chunk Table
+        save_chunk_to_csv(csv_filename, chunk_number, DATA_BUFFER[:CHUNK_SIZE], node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
+    
         # Generate the matrix table for the chunk
         generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
 
