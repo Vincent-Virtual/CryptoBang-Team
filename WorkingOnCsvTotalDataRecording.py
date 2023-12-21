@@ -22,10 +22,18 @@ exit_flag = False  # Flag for graceful exit
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 
+# Function to print colored text in the terminal
+def print_colored(text, color):
+    colors = {
+        'green': '\033[92m',
+        'red': '\033[91m',
+        'end': '\033[0m',
+    }
+    print(f"{colors[color]}{text}{colors['end']}")
+
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
-
 
 # CSV File Initialization
 csv_filename = 'data.csv'
@@ -76,10 +84,8 @@ class DHT:
 
 # Function to segment the data
 def segment_data(data, private_key):
-    if len(data) < 250:
-        return []
-
-    segments = [data[i:i + CHUNK_SIZE // NUMBER_OF_SEGMENTS] for i in range(0, len(data), CHUNK_SIZE // NUMBER_OF_SEGMENTS)]
+    segment_length = len(data) // NUMBER_OF_SEGMENTS
+    segments = [data[i:i + segment_length] for i in range(0, len(data), segment_length)]
 
     segment_info = []
     for segment in segments:
@@ -110,24 +116,32 @@ def process_buffer(dht, chunk_number):
         chunk_data = DATA_BUFFER[:CHUNK_SIZE]
         DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
-        print(f"Chunk {chunk_number}")
+        print(f"Processing Chunk {chunk_number}...")
         segments_info = segment_data(chunk_data, private_key)
         node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
         chunk_consensus = True
         total_true_votes = 0
 
-        for segment, segment_hash, signature, timestamp in segments_info:
+        for segment_index, (segment, segment_hash, signature, timestamp) in enumerate(segments_info):
             segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
-            for node_id in range(NUMBER_OF_NODES):
-                node_votes[node_id].append(segment_votes[node_id])
-                if segment_votes[node_id]:
+            print(f"Segment {segment_index + 1} Votes:", segment_votes)
+            for node_id, vote in segment_votes.items():
+                node_votes[node_id].append(vote)
+                if vote:
                     total_true_votes += 1
             chunk_consensus &= (sum(segment_votes.values()) >= math.ceil(0.7 * NUMBER_OF_NODES))
 
+        for node_id, votes in node_votes.items():
+            print(f"Node {node_id} Votes: {votes}")
+
         total_votes = len(segments_info) * NUMBER_OF_NODES
         true_vote_percentage = (total_true_votes / total_votes) * 100
-        chunk_verification_outcome = 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'
-        print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true)")
+
+        # Using print_colored based on the outcome
+        if chunk_consensus:
+            print_colored(f"Chunk {chunk_number} Verified Successfully ({true_vote_percentage:.2f}% true)", 'green')
+        else:
+            print_colored(f"Chunk {chunk_number} Verified Unsuccessfully ({true_vote_percentage:.2f}% true)", 'red')
 
         # Compute digital signature for the entire chunk
         chunk_signature = private_key.sign(
@@ -141,7 +155,7 @@ def process_buffer(dht, chunk_number):
         chunk_signature_readable = chunk_signature.hex()
 
         # Save chunk data to CSV
-        save_to_csv(datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, chunk_verification_outcome, true_vote_percentage)
+        save_to_csv(datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully', true_vote_percentage)
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
