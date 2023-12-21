@@ -1,3 +1,4 @@
+# All Imports
 import websocket
 import json
 import threading
@@ -11,21 +12,21 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
 import xlsxwriter
 
-# Constants
-NUMBER_OF_NODES = 10
-FAULTY_PROPORTION = 1/3
+# Defining Constants
+NUMBER_OF_NODES = 10 # Number of Nodes to Run
+FAULTY_PROPORTION = 1/3 # Proportion of nodes that will be Faulty
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
-CHUNK_SIZE = 500  # Adjusted chunk size
+CHUNK_SIZE = 500  # Chunk Size
 BUFFER_CHECK_FREQUENCY = 5  # Seconds
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
-TOTAL_VOTES = NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2)
-MIN_APPROVALS = 2 * (TOTAL_VOTES // 3) + 1
+TOTAL_VOTES = NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2) # Helps Approval Algorithm
+MIN_APPROVALS = 2 * (TOTAL_VOTES // 3) + 1 # Degines Threshhold to Pass
 SEGMENT_LENGTH = 20 
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
-DATA_BUFFER = ""  # Initialize data buffer
-exit_flag = False  # Flag for graceful exit
+DATA_BUFFER = ""  # Initializing Data Buffer
+exit_flag = False  # Flag for Graceful Exit
 
-# Define global workbook and worksheet for matrix data
+# Defining global workbook and worksheet for matrix data
 workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
 worksheet = workbook.add_worksheet()
 
@@ -39,11 +40,12 @@ for col_num, header in enumerate(headers):
     worksheet.write(0, col_num, header)
 
 # Start row for the first chunk
-start_row = 1  # Global declaration
+start_row = 1 
 
 # Write headers to the worksheet, across the first row
 for col_num, header in enumerate(headers):
     worksheet.write(0, col_num, header)
+
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
@@ -100,6 +102,7 @@ class DHT:
 
 # Function to segment the data
 def segment_data(data, private_key):
+
     # Define head and tail segments
     head = data[:50]  # First 50 characters for head segment
     tail = data[-50:]  # Last 50 characters for tail segment
@@ -139,15 +142,17 @@ def segment_data(data, private_key):
 def save_chunk_to_csv(filename, chunk_number, chunk_data, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
     with open(filename, 'a', newline='') as file:
         writer = csv.writer(file)
+
         # Write the headers if the file is empty
         if file.tell() == 0:
             writer.writerow(["Chunk Number", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+        
         # Write the chunk data
         timestamp = datetime.now().timestamp()
         digital_signature = ','.join(info[2].hex() for info in segments_info)  # Assuming this is how you get the digital signature
         writer.writerow([chunk_number, timestamp, chunk_data, CHUNK_SIZE, digital_signature, chunk_verification_outcome, f"{true_vote_percentage:.2f}%"])
 
-# Name for the first Excel file
+# Name for the Data Chunk Excel file
 csv_filename = 'chunk_data_records.csv'
 
 # Function to generate matrix table
@@ -176,6 +181,7 @@ def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verific
         # Write the verification outcome, size of data received, hashes, signatures, timestamps, and node status
         worksheet.write(start_row + node_id, 5 + NUMBER_OF_SEGMENTS, chunk_verification_outcome)
         worksheet.write(start_row + node_id, 6 + NUMBER_OF_SEGMENTS, CHUNK_SIZE)
+        
         # Combine hashes, signatures, and timestamps from segments_info
         hashes = ', '.join(info[1] for info in segments_info)
         signatures = ', '.join(info[2].hex() for info in segments_info)
@@ -183,6 +189,7 @@ def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verific
         worksheet.write(start_row + node_id, 7 + NUMBER_OF_SEGMENTS, hashes)
         worksheet.write(start_row + node_id, 8 + NUMBER_OF_SEGMENTS, signatures)
         worksheet.write(start_row + node_id, 9 + NUMBER_OF_SEGMENTS, timestamps)
+        
         # Determine node status based on the majority vote
         status = 'GOOD' if positive_votes >= math.ceil((NUMBER_OF_SEGMENTS + 2) * 0.85) else 'FAULTY'
         worksheet.write(start_row + node_id, 10 + NUMBER_OF_SEGMENTS, status)
@@ -246,7 +253,8 @@ def process_binance_message(ws_message):
     message_data = json.loads(ws_message)
     if 'p' in message_data:
         DATA_BUFFER += message_data['p']
-    else:
+
+    else:        
         print("No price field in the received message.")
 
 # Binance WebSocket event handlers
@@ -267,14 +275,17 @@ binance_ws_url = "wss://stream.binance.com:9443/ws/btcusdt@trade"
 ws = websocket.WebSocketApp(binance_ws_url, on_message=on_message, on_error=on_error, on_close=on_close)
 
 dht = DHT(public_key)
+# Implementing Threading
 ws_thread = threading.Thread(target=ws.run_forever)
 ws_thread.start()
 
+# Implementing Buffer Threads
 buffer_thread = threading.Thread(target=lambda: check_buffer_size(dht))
 buffer_thread.start()
 
 # Main loop for keeping the script running
 try:
+
     while True:
         if exit_flag:
             break
