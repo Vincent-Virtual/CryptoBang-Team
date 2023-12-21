@@ -11,6 +11,10 @@ import os
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
 
 VERIFICATION_THRESHOLD = 0.7  # 70% of True votes required for successful verification
 
