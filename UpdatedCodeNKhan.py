@@ -6,21 +6,16 @@ import random
 import math
 import hashlib
 import csv
-import pandas as pd 
-import os
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from datetime import datetime
-import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
-from openpyxl.utils import get_column_letter
+import xlsxwriter
 
-VERIFICATION_THRESHOLD = 0.7  # 70% of True votes required for successful verification
 
 # Constants
 NUMBER_OF_NODES = 10
 FAULTY_PROPORTION = 1/3
+FAULTY_NODE_CHANCE = 0.5  # 50% chance for faulty nodes to vote true/false
 NUMBER_OF_FAULTY_NODES = math.floor(NUMBER_OF_NODES * FAULTY_PROPORTION)
 CHUNK_SIZE = 500  # Adjusted chunk size
 BUFFER_CHECK_FREQUENCY = 20  # Seconds
@@ -28,58 +23,36 @@ DATA_BUFFER = ""  # Initialize data buffer
 exit_flag = False  # Flag for graceful exit
 
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
+SEGMENT_LENGTH = 20 
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 
-import os
+# Define global workbook and worksheet
+workbook = xlsxwriter.Workbook('matrix_tables.xlsx')
+worksheet = workbook.add_worksheet()
 
-def save_to_excel(chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage):
-    # Create a DataFrame for the chunk data
-    df = pd.DataFrame({
-        "Chunk #": [chunk_number],
-        "Timestamp": [timestamp],
-        "Chunk Data": [chunk_data],
-        "Chunk Size": [chunk_size],
-        "Digital Signature": [digital_signature],
-        "Verification Outcome": [outcome],
-        "True Vote Percentage": [true_vote_percentage]
-    })
-    
-    # Define the Excel writer
-    excel_file = 'data.xlsx'
-    sheet_name = 'Sheet1'
-    
-    # Check if the Excel file already exists
-    if not os.path.isfile(excel_file):
-        with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    else:
-        # If the file exists, then open it and append data without adding header
-        with pd.ExcelWriter(excel_file, mode='a', engine='openpyxl', if_sheet_exists='overlay') as writer:
-            # Get the last row in the existing Excel sheet
-            # If there is no sheet, then index is 0 by default
-            startrow = writer.sheets[sheet_name].max_row if sheet_name in writer.sheets else 0
-            
-            # Write data starting from the last row
-            df.to_excel(writer, sheet_name=sheet_name, startrow=startrow, index=False, header=False)
+# Initialize the Excel file with headers only once
+headers = ['Chunk #', 'HEAD SEGMENT', 'SEGMENT 1', 'SEGMENT 2', 'SEGMENT 3', 'SEGMENT 4', 'SEGMENT 5', 'TAIL SEGMENT',
+           'VERIFICATION PERCENTAGE PER NODE', 'VERIFICATION OUTCOME', 'SIZE OF DATA RECEIVED', 'HASHES OF DATA SEGMENTS',
+           'DIGITAL SIGNATURES OF DATA SEGMENTS', 'TIMESTAMPS OF DATA SEGMENTS', 'NODE STATUS']
 
-# Function to print colored text in the terminal
-def print_colored(text, color):
-    colors = {
-        'green': '\033[92m',
-        'red': '\033[91m',
-        'end': '\033[0m',
-    }
-    print(f"{colors[color]}{text}{colors['end']}")
+# Write headers to the worksheet
+for i, header in enumerate(headers):
+    worksheet.write(i, 0, header)
+
+# Start row for the first chunk
+start_row = 1
 
 # Generate RSA keys (private and public)
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 public_key = private_key.public_key()
 
+
+
 # CSV File Initialization
 csv_filename = 'data.csv'
 with open(csv_filename, 'w', newline='') as file:
     writer = csv.writer(file)
-    writer.writerow(["Chunk #", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+    writer.writerow(["Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
 
 # Node Class
 class Node:
@@ -123,12 +96,26 @@ class DHT:
         return {node.node_id: node.vote(segment, segment_hash, self.public_key, signature, timestamp) for node in self.nodes}
 
 # Function to segment the data
-# Function to segment the data
 def segment_data(data, private_key):
-    head = data[:CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2)]
-    tail = data[-CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2):]
-    segments = [head] + [data[i:i + CHUNK_SIZE // NUMBER_OF_SEGMENTS] for i in range(CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2), len(data) - CHUNK_SIZE // (NUMBER_OF_SEGMENTS + 2), CHUNK_SIZE // NUMBER_OF_SEGMENTS)] + [tail]
+    # Define head and tail segments
+    head = data[:50]  # First 50 characters for head segment
+    tail = data[-50:]  # Last 50 characters for tail segment
 
+    # Calculate the length of the entire middle section
+    middle_section_length = CHUNK_SIZE - (len(head) + len(tail))
+    segment_length = middle_section_length // NUMBER_OF_SEGMENTS
+
+    # Define middle segments
+    middle_start = len(head)
+    segments = [head]
+    for _ in range(NUMBER_OF_SEGMENTS):
+        segments.append(data[middle_start:middle_start + segment_length])
+        middle_start += segment_length
+
+    # Add the tail segment
+    segments.append(tail)
+
+    # Generate hash, signature, and timestamp for each segment
     segment_info = []
     for segment in segments:
         segment_hash = hashlib.sha256(segment.encode()).hexdigest()
@@ -146,55 +133,95 @@ def segment_data(data, private_key):
     return segment_info
 
 # Function to save chunk data to CSV
-def save_to_csv(chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage):
-    with open(csv_filename, 'a', newline='') as file:
+def save_chunk_to_csv(filename, chunk_number, chunk_data, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
+    with open(filename, 'a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([chunk_number, timestamp, chunk_data, chunk_size, digital_signature, outcome, true_vote_percentage])
+        # Write the headers if the file is empty
+        if file.tell() == 0:
+            writer.writerow(["Chunk Number", "Timestamp", "Chunk Data", "Chunk Size", "Digital Signature", "Verification Outcome", "True Vote Percentage"])
+        # Write the chunk data
+        timestamp = datetime.now().timestamp()
+        digital_signature = ','.join(info[2].hex() for info in segments_info)  # Assuming this is how you get the digital signature
+        writer.writerow([chunk_number, timestamp, chunk_data, CHUNK_SIZE, digital_signature, chunk_verification_outcome, f"{true_vote_percentage:.2f}%"])
+
+# Name for the first Excel file
+csv_filename = 'chunk_data_records.csv'
+def generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage):
+    global worksheet, start_row
+
+    # Write Chunk number for all nodes
+    for i in range(NUMBER_OF_NODES):
+        worksheet.write(start_row + i, 0, f'Chunk {chunk_number}')
+
+    # Write the data for each node
+    for node_id in range(NUMBER_OF_NODES):
+        worksheet.write(start_row + node_id, 1, f'NODE {node_id}')  # Node ID
+
+        # Write True/False for the head segment, middle segments, and tail segment
+        worksheet.write(start_row + node_id, 2, 'True' if node_votes[node_id][0] else 'False')  # Head segment
+        for segment_index, vote in enumerate(node_votes[node_id][1:-1], start=3):  # Middle segments
+            worksheet.write(start_row + node_id, segment_index, 'True' if vote else 'False')
+        worksheet.write(start_row + node_id, 3 + NUMBER_OF_SEGMENTS, 'True' if node_votes[node_id][-1] else 'False')  # Tail segment
+
+        # Write the verification percentage per node
+        positive_votes = node_votes[node_id].count(True)
+        verification_percentage_per_node = (positive_votes / (NUMBER_OF_SEGMENTS + 2)) * 100  # Including head and tail
+        worksheet.write(start_row + node_id, 4 + NUMBER_OF_SEGMENTS, f"{verification_percentage_per_node:.2f}%")
+
+        # Write the verification outcome, size of data received, hashes, signatures, timestamps, and node status
+        worksheet.write(start_row + node_id, 5 + NUMBER_OF_SEGMENTS, chunk_verification_outcome)
+        worksheet.write(start_row + node_id, 6 + NUMBER_OF_SEGMENTS, CHUNK_SIZE)
+        # Combine hashes, signatures, and timestamps from segments_info
+        hashes = ', '.join(info[1] for info in segments_info)
+        signatures = ', '.join(info[2].hex() for info in segments_info)
+        timestamps = ', '.join(str(info[3]) for info in segments_info)
+        worksheet.write(start_row + node_id, 7 + NUMBER_OF_SEGMENTS, hashes)
+        worksheet.write(start_row + node_id, 8 + NUMBER_OF_SEGMENTS, signatures)
+        worksheet.write(start_row + node_id, 9 + NUMBER_OF_SEGMENTS, timestamps)
+        # Determine node status based on the majority vote
+        status = 'GOOD' if positive_votes >= math.ceil((NUMBER_OF_SEGMENTS + 2) * 0.85) else 'FAULTY'
+        worksheet.write(start_row + node_id, 10 + NUMBER_OF_SEGMENTS, status)
+
+    # After writing all nodes, increment start_row to skip to the next chunk's start
+    start_row += NUMBER_OF_NODES
+
 
 # Function to process and clear the buffer
 def process_buffer(dht, chunk_number):
-    global DATA_BUFFER, VERIFICATION_THRESHOLD
+    global DATA_BUFFER
     if len(DATA_BUFFER) >= CHUNK_SIZE:
-        chunk_data = DATA_BUFFER[:CHUNK_SIZE]
-        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
-        print(f"Processing Chunk {chunk_number}...")
-        segments_info = segment_data(chunk_data, private_key)
-        node_votes = {node_id: [] for node_id in range(NUMBER_OF_NODES)}
-        chunk_consensus = True
-        total_true_votes = 0
+        # Process the DATA_BUFFER to get the segments info
+        segments_info = segment_data(DATA_BUFFER, private_key)
 
-        for segment_index, (segment, segment_hash, signature, timestamp) in enumerate(segments_info):
-            segment_votes = dht.process_segment(segment, segment_hash, signature, timestamp)
-            for node_id, vote in segment_votes.items():
+        # Voting by nodes
+        node_votes = {}
+        for node_id in range(NUMBER_OF_NODES):
+            node_votes[node_id] = []
+            for segment_info in segments_info:
+                segment, segment_hash, signature, timestamp = segment_info
+                vote = dht.nodes[node_id].vote(segment, segment_hash, public_key, signature, timestamp)
                 node_votes[node_id].append(vote)
-                total_true_votes += int(vote)
 
+        # Calculate verification outcome and percentage
+        total_true_votes = sum(vote for votes in node_votes.values() for vote in votes)
+        total_votes = (NUMBER_OF_SEGMENTS + 2) * NUMBER_OF_NODES  # +2 for head and tail segments
+        true_vote_percentage = (total_true_votes / total_votes) * 100
+        chunk_verification_outcome = 'Verified Successfully' if total_true_votes >= math.ceil(total_votes * 0.7) else 'Verified Unsuccessfully'
+
+        # Output to the terminal
         print(f"Chunk {chunk_number}")
         for node_id, votes in node_votes.items():
             print(f"Node {node_id} Votes: {votes}")
+        print(f"Chunk {chunk_number} {chunk_verification_outcome} ({true_vote_percentage:.2f}% true)")
 
-        # Calculate the consensus and true vote percentage
-        total_votes = NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2)
-        true_vote_percentage = (total_true_votes / total_votes) * 100
-        chunk_consensus = true_vote_percentage >= (VERIFICATION_THRESHOLD * 100)
+        # Generate Data Chunk Table
+        save_chunk_to_csv(csv_filename, chunk_number, DATA_BUFFER[:CHUNK_SIZE], node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
+    
+        # Generate the matrix table for the chunk
+        generate_matrix_table(chunk_number, node_votes, segments_info, chunk_verification_outcome, true_vote_percentage)
 
-        # Print results with colored text
-        consensus_text = 'Verified Successfully' if chunk_consensus else 'Verified Unsuccessfully'
-        print_colored(f"Chunk {chunk_number} {consensus_text} ({true_vote_percentage:.2f}% true)", 'green' if chunk_consensus else 'red')
-
-        # Compute digital signature for the entire chunk
-        chunk_signature = private_key.sign(
-            chunk_data.encode(),
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
-        )
-        chunk_signature_readable = chunk_signature.hex()
-
-        # Save chunk data to Excel
-        save_to_excel(chunk_number, datetime.now().timestamp(), chunk_data, len(chunk_data), chunk_signature_readable, consensus_text, true_vote_percentage)
+        # Clear the DATA_BUFFER for the next chunk
+        DATA_BUFFER = DATA_BUFFER[CHUNK_SIZE:]
 
 # Function to check buffer size periodically
 def check_buffer_size(dht):
@@ -262,4 +289,5 @@ ws_thread.join()
 
 print("Program exited gracefully.")
 
-
+# Do not forget to close the workbook after processing all chunks
+workbook.close()
