@@ -20,7 +20,11 @@ CHUNK_SIZE = 500  # Chunk Size
 BUFFER_CHECK_FREQUENCY = 5  # Seconds
 NUMBER_OF_SEGMENTS = 5  # Define the number of segments per chunk
 TOTAL_VOTES = NUMBER_OF_NODES * (NUMBER_OF_SEGMENTS + 2) # Helps Approval Algorithm
-MIN_APPROVALS = 2 * (TOTAL_VOTES // 3) + 1 # Degines Threshhold to Pass
+
+
+MIN_APPROVALS = 2 * (TOTAL_VOTES // 3) + 1 # Determines Threshhold to Pass
+
+
 SEGMENT_LENGTH = 20 
 NUMBER_OF_CHUNKS = 3    # Define the number of chunks to process
 DATA_BUFFER = ""  # Initializing Data Buffer
